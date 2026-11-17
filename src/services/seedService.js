@@ -140,7 +140,6 @@ export async function seedInitialData() {
       });
     }
 
-    console.log('[Seed] Database initialization and fixed roles verified.');
   } catch (error) {
     console.error(`[Seed Error] Seeding failed: ${error.message}`);
   }
