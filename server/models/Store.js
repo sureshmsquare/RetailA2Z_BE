@@ -1,16 +1,36 @@
 import mongoose from 'mongoose';
 
+const addressSchema = new mongoose.Schema(
+  {
+    line1: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    city: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    state: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    pincode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
 const storeSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      trim: true,
-      default: function () {
-        return this.storeName || 'Retail Store';
-      },
-    },
-    storeName: {
-      type: String,
+      required: [true, 'Store name is required'],
       trim: true,
     },
     storeCode: {
@@ -19,8 +39,8 @@ const storeSchema = new mongoose.Schema(
       default: null,
     },
     address: {
-      type: mongoose.Schema.Types.Mixed,
-      default: '',
+      type: addressSchema,
+      default: () => ({}),
     },
     gstin: {
       type: String,
@@ -43,21 +63,7 @@ const storeSchema = new mongoose.Schema(
   }
 );
 
-// Synchronize name and storeName
-storeSchema.pre('save', function (next) {
-  if (this.name && !this.storeName) {
-    this.storeName = this.name;
-  } else if (this.storeName && !this.name) {
-    this.name = this.storeName;
-  }
-  next();
-});
-
-storeSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  if (!obj.name && obj.storeName) obj.name = obj.storeName;
-  return obj;
-};
+storeSchema.index({ storeCode: 1 }, { unique: true, sparse: true });
 
 const Store = mongoose.model('Store', storeSchema);
 export default Store;

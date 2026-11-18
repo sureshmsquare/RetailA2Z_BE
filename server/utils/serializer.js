@@ -3,8 +3,7 @@
  * Salesman and collections users must NEVER receive item rate, MRP, cost or margin
  * in ANY API response (search, drafts, previews, exports).
  *
- * TODO: This serializer MUST be used in every future item, catalog, and billing API endpoint.
- * DO NOT rely on the frontend to hide prices. Enforce it at the backend serialization layer.
+ * Enforced at the backend serialization layer.
  *
  * @param {Object} item - Item / product record (plain object or Mongoose document)
  * @param {string} role - The user's role ("admin", "salesman", "collections")
@@ -25,15 +24,19 @@ export function serializeItemForRole(item, role) {
   const restrictedFields = [
     'rate',
     'mrp',
+    'mrpPaise',
     'cost',
     'costPrice',
     'purchasePrice',
     'sellingPrice',
+    'sellingPricePaise',
     'price',
     'margin',
     'marginPercent',
     'discountRate',
     'wholesalePrice',
+    'mrpSource',
+    'codeSource',
   ];
 
   for (const field of restrictedFields) {
@@ -50,11 +53,13 @@ export function serializeItemForRole(item, role) {
 
 /**
  * Convenience helper to serialize an array of items for a user role
- *
- * TODO: MUST be used in search, list, inventory, and bill drafts endpoints across RetailA2Z.
  */
 export function serializeItemListForRole(items, role) {
   if (!Array.isArray(items)) return [];
   return items.map((item) => serializeItemForRole(item, role));
 }
 
+export default {
+  serializeItemForRole,
+  serializeItemListForRole,
+};

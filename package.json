@@ -8,18 +8,25 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node server/services/seedService.js",
-    "test": "node tests/checklist.test.js"
+    "migrate:categories": "node scripts/migrateItemCategories.js",
+    "test": "node tests/checklist.test.js && node tests/items.test.js && node tests/categories.test.js",
+    "test:items": "node tests/items.test.js",
+    "test:categories": "node tests/categories.test.js",
+    "test:checklist": "node tests/checklist.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csv-parse": "^7.0.3",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.4",
     "express-validator": "^7.3.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "multer": "^2.5.0"
   }
 }

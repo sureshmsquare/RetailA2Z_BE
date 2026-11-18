@@ -4,7 +4,11 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import categoryRoutes from './routes/categoryRoutes.js';
+import itemRoutes from './routes/itemRoutes.js';
+import stockRoutes from './routes/stockRoutes.js';
 import { authenticate, requireStoreAccess, scopeToStore } from './middleware/auth.js';
+import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
 
@@ -34,6 +38,9 @@ app.get('/api/health', (req, res) => {
 // Mount modules
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/items', itemRoutes);
+app.use('/api/stock', stockRoutes);
 
 // Store-scoped endpoint for testing store isolation & scopeToStore helper
 app.get('/api/test/store-scoped', authenticate, requireStoreAccess, (req, res) => {
@@ -51,19 +58,7 @@ app.get('/api/test/store-scoped', authenticate, requireStoreAccess, (req, res) =
   });
 });
 
-// Central Error Handler
-app.use((err, req, res, next) => {
-  console.error('[Unhandled Error]', err);
-
-  const statusCode = err.statusCode || err.status || 500;
-  const message = err.message || 'Internal server error';
-
-  res.status(statusCode).json({
-    success: false,
-    message,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-  });
-});
+// Central Error Handler (registered LAST)
+app.use(errorHandler);
 
 export default app;
-

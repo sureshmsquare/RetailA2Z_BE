@@ -6,6 +6,7 @@ process.env.NODE_ENV = 'test';
 import mongoose from 'mongoose';
 import app from '../server/app.js';
 import connectDB from '../server/config/db.js';
+import seedInitialData from '../server/services/seedService.js';
 import User from '../server/models/User.js';
 import Store from '../server/models/Store.js';
 import AuditLog from '../server/models/AuditLog.js';
@@ -17,6 +18,7 @@ async function runChecklist() {
   console.log('================================================================\n');
 
   await connectDB();
+  await seedInitialData();
 
   // Start temporary server on test port 5001
   const TEST_PORT = 5001;

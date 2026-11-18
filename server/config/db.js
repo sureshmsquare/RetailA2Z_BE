@@ -2,10 +2,19 @@ import mongoose from 'mongoose';
 
 export async function connectDB(uri) {
   try {
-    const mongoUri = uri || process.env.MONGO_URI || process.env.MONGODB_URI;
+    let mongoUri = uri;
     if (!mongoUri) {
-      throw new Error('MongoDB URI is not defined in environment variables (MONGO_URI).');
+      if (process.env.NODE_ENV === 'test') {
+        mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI;
+      } else {
+        mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
+      }
     }
+
+    if (!mongoUri) {
+      throw new Error('MongoDB URI is not defined in environment variables.');
+    }
+
     const conn = await mongoose.connect(mongoUri);
     return conn;
   } catch (error) {
