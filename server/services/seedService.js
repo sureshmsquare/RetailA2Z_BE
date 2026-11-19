@@ -8,6 +8,7 @@ import Store from '../models/Store.js';
 import User from '../models/User.js';
 import Category, { normalizeCategoryName } from '../models/Category.js';
 import Brand, { normalizeBrandName } from '../models/Brand.js';
+import Supplier, { normalizeSupplierName } from '../models/Supplier.js';
 import Item from '../models/Item.js';
 import PriceHistory from '../models/PriceHistory.js';
 import auditService from './auditService.js';
@@ -306,6 +307,34 @@ export async function seedInitialData() {
       };
       await item.save();
     }
+  }
+
+  // 6. Seed Sample Supplier for Main Store (Idempotent)
+  // Main Store: one sample supplier "Sample Pipe Distributors", mobile 9876500001, city Pune, creditDays 30.
+  const sampleSupplierName = 'Sample Pipe Distributors';
+  const { nameKey: supplierNameKey } = normalizeSupplierName(sampleSupplierName);
+  let supplier = await Supplier.findOne({ storeId: mainStore._id, nameKey: supplierNameKey });
+  if (!supplier) {
+    await Supplier.create({
+      storeId: mainStore._id,
+      name: sampleSupplierName,
+      nameKey: supplierNameKey,
+      mobile: '9876500001',
+      address: {
+        city: 'Pune',
+      },
+      creditDays: 30,
+      isActive: true,
+      createdBy: seedActor,
+      updatedBy: seedActor,
+    });
+  } else {
+    supplier.mobile = supplier.mobile || '9876500001';
+    supplier.address = supplier.address || {};
+    supplier.address.city = supplier.address.city || 'Pune';
+    supplier.creditDays = supplier.creditDays ?? 30;
+    supplier.isActive = true;
+    await supplier.save();
   }
 }
 
