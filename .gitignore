@@ -27,3 +27,10 @@ pids/
 # OS
 .DS_Store
 Thumbs.db
+
+# Automated tests (local only)
+/tests/
+
+# Test files (local only)
+*.test.*
+*.spec.*
