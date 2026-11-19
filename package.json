@@ -9,9 +9,11 @@
     "dev": "node --watch server.js",
     "seed": "node server/services/seedService.js",
     "migrate:categories": "node scripts/migrateItemCategories.js",
-    "test": "node tests/checklist.test.js && node tests/items.test.js && node tests/categories.test.js",
+    "migrate:brands": "node scripts/migrateItemBrands.js",
+    "test": "node tests/checklist.test.js && node tests/items.test.js && node tests/categories.test.js && node tests/brands.test.js",
     "test:items": "node tests/items.test.js",
     "test:categories": "node tests/categories.test.js",
+    "test:brands": "node tests/brands.test.js",
     "test:checklist": "node tests/checklist.test.js"
   },
   "dependencies": {

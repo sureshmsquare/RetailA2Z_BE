@@ -40,10 +40,11 @@ const itemSchema = new mongoose.Schema(
       required: [true, 'Item name is required'],
       trim: true,
     },
-    brand: {
-      type: String,
-      trim: true,
-      default: '',
+    brandId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Brand',
+      default: null,
+      index: true,
     },
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -123,7 +124,7 @@ itemSchema.index({ storeId: 1, productCode: 1 }, { unique: true });
 
 // Performance indexes for search and filtering
 itemSchema.index({ storeId: 1, name: 1 });
-itemSchema.index({ storeId: 1, brand: 1 });
+itemSchema.index({ storeId: 1, brandId: 1 });
 itemSchema.index({ storeId: 1, categoryId: 1 });
 itemSchema.index({ storeId: 1, status: 1 });
 
