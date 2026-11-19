@@ -36,3 +36,10 @@ export const validateSetCategoryStatus = [
     .withMessage('isActive must be a boolean'),
 ];
 
+export const validateDeleteCategory = [
+  param('id')
+    .custom(isValidObjectId)
+    .withMessage('Invalid category ID format'),
+];
+
+

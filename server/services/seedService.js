@@ -7,6 +7,7 @@ import connectDB from '../config/db.js';
 import Store from '../models/Store.js';
 import User from '../models/User.js';
 import Category, { normalizeCategoryName } from '../models/Category.js';
+import Brand, { normalizeBrandName } from '../models/Brand.js';
 import Item from '../models/Item.js';
 import PriceHistory from '../models/PriceHistory.js';
 import auditService from './auditService.js';
@@ -173,7 +174,27 @@ export async function seedInitialData() {
     seededCategories[nameKey] = cat;
   }
 
-  // 4. Seed Sample Items for Main Store (Draft status, no selling price)
+  // 4. Seed Brands for Main Store: BirlaNu and Supreme (Idempotent)
+  const brandNamesToSeed = ['BirlaNu', 'Supreme'];
+  const seededBrands = {};
+
+  for (const rawBrandName of brandNamesToSeed) {
+    const { name, nameKey } = normalizeBrandName(rawBrandName);
+    let brand = await Brand.findOne({ storeId: mainStore._id, nameKey });
+    if (!brand) {
+      brand = await Brand.create({
+        storeId: mainStore._id,
+        name,
+        nameKey,
+        isActive: true,
+        createdBy: seedActor,
+        updatedBy: seedActor,
+      });
+    }
+    seededBrands[nameKey] = brand;
+  }
+
+  // 5. Seed Sample Items for Main Store (Draft status, no selling price)
   // Brand: BirlaNu, Source: "BirlaNu price list", Version: "July 2025"
   const sampleItems = [
     {
@@ -182,7 +203,7 @@ export async function seedInitialData() {
       size: '20 mm',
       length: '3 m',
       mrp: 412.0,
-      brand: 'BirlaNu',
+      brandKey: 'birlanu',
       categoryKey: 'cpvc pipes',
       sellingUnit: 'MTR',
       unitsPerPack: 1,
@@ -193,7 +214,7 @@ export async function seedInitialData() {
       size: '15 mm',
       length: '5 m',
       mrp: 474.0,
-      brand: 'BirlaNu',
+      brandKey: 'birlanu',
       categoryKey: 'cpvc pipes',
       sellingUnit: 'MTR',
       unitsPerPack: 1,
@@ -204,7 +225,7 @@ export async function seedInitialData() {
       size: '15 mm',
       length: '',
       mrp: 19.25,
-      brand: 'BirlaNu',
+      brandKey: 'birlanu',
       categoryKey: 'cpvc fittings',
       sellingUnit: 'PCS',
       unitsPerPack: 1,
@@ -215,7 +236,7 @@ export async function seedInitialData() {
       size: '500 L',
       length: '',
       mrp: 6500.0,
-      brand: 'BirlaNu',
+      brandKey: 'birlanu',
       categoryKey: 'water tanks',
       sellingUnit: 'PCS',
       unitsPerPack: 1,
@@ -231,13 +252,15 @@ export async function seedInitialData() {
     const mrpPaise = toPaise(itemData.mrp);
     const categoryDoc = seededCategories[itemData.categoryKey] || null;
     const categoryId = categoryDoc ? categoryDoc._id : null;
+    const brandDoc = seededBrands[itemData.brandKey] || null;
+    const brandId = brandDoc ? brandDoc._id : null;
 
     if (!item) {
       item = await Item.create({
         storeId: mainStore._id,
         productCode: itemData.productCode,
         name: itemData.name,
-        brand: itemData.brand,
+        brandId,
         categoryId,
         size: itemData.size,
         length: itemData.length,
@@ -269,7 +292,7 @@ export async function seedInitialData() {
     } else {
       // Idempotently update metadata without touching selling price
       item.name = itemData.name;
-      item.brand = itemData.brand;
+      item.brandId = brandId;
       item.categoryId = categoryId;
       item.size = itemData.size;
       item.length = itemData.length;

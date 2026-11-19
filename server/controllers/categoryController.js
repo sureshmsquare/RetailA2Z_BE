@@ -112,6 +112,27 @@ export const categoryController = {
       next(error);
     }
   },
+
+  /**
+   * DELETE /api/categories/:id
+   * Admin only
+   */
+  async deleteCategory(req, res, next) {
+    try {
+      await categoryService.deleteCategory({
+        storeId: req.storeId,
+        actor: req.user?._id || req.user?.id || 'admin',
+        id: req.params.id,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Category deleted successfully.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
 };
 
 export default categoryController;
