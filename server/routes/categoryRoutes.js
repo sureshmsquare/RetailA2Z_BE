@@ -6,6 +6,7 @@ import {
   validateCreateCategory,
   validateRenameCategory,
   validateSetCategoryStatus,
+  validateDeleteCategory,
 } from '../validators/categoryValidators.js';
 
 const router = Router();
@@ -16,7 +17,7 @@ router.use(authenticate, requireStoreAccess);
 // Active category dropdown options (Admin + Salesman) - defined BEFORE /:id
 router.get('/options', authorize('admin', 'salesman'), categoryController.listActiveCategoryOptions);
 
-// Category Master management (Admin only; no DELETE endpoint)
+// Category Master management (Admin only)
 router.get('/', authorize('admin'), categoryController.listCategories);
 router.post(
   '/',
@@ -38,6 +39,13 @@ router.patch(
   validateSetCategoryStatus,
   validate,
   categoryController.setCategoryStatus
+);
+router.delete(
+  '/:id',
+  authorize('admin'),
+  validateDeleteCategory,
+  validate,
+  categoryController.deleteCategory
 );
 
 export default router;

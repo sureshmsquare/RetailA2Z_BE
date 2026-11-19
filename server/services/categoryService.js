@@ -253,6 +253,75 @@ export const categoryService = {
       name: cat.name,
     }));
   },
+
+  /**
+   * Hard-deletes a category if it has no items.
+   * If the category has any items (draft, active, inactive), throws AppError 409:
+   * "Category has <N> item(s). Deactivate it instead."
+   */
+  async deleteCategory({ storeId, id, categoryId, actor, session = null }) {
+    const catId = id || categoryId;
+    if (!mongoose.Types.ObjectId.isValid(String(catId))) {
+      throw new AppError('Invalid category ID format', 400);
+    }
+
+    const executeDelete = async (activeSession) => {
+      const category = await Category.findOne(scopeToStore({ _id: catId }, storeId)).session(
+        activeSession || null
+      );
+      if (!category) {
+        throw new AppError('Category not found in this store', 404);
+      }
+
+      const itemCount = await Item.countDocuments(
+        scopeToStore({ categoryId: category._id }, storeId)
+      ).session(activeSession || null);
+
+      if (itemCount > 0) {
+        throw new AppError(`Category has ${itemCount} item(s). Deactivate it instead.`, 409);
+      }
+
+      const beforeState = category.toObject();
+
+      await category.deleteOne({ session: activeSession || undefined });
+
+      await auditService.log({
+        actor,
+        storeId,
+        action: 'CATEGORY_DELETE',
+        entity: 'Category',
+        entityId: category._id,
+        before: beforeState,
+        reason: `Category "${category.name}" deleted`,
+      });
+
+      return {
+        id: String(category._id),
+        name: category.name,
+      };
+    };
+
+    if (session) {
+      return executeDelete(session);
+    }
+
+    // Check if MongoDB deployment supports replica set transactions
+    const isReplicaSet = Boolean(mongoose.connection?.client?.topology?.description?.setName);
+    if (isReplicaSet) {
+      const internalSession = await mongoose.startSession();
+      try {
+        let result;
+        await internalSession.withTransaction(async () => {
+          result = await executeDelete(internalSession);
+        });
+        return result;
+      } finally {
+        await internalSession.endSession();
+      }
+    }
+
+    return executeDelete(null);
+  },
 };
 
 export default categoryService;
