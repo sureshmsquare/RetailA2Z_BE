@@ -44,6 +44,24 @@ const stockMovementSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    sourceType: {
+      type: String,
+      enum: ['Purchase', 'PurchaseCancel', 'Opening', 'Adjustment', null],
+      default: null,
+    },
+    sourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    sourceLineId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    reversalOfMovementId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'StockMovement',
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.Mixed,
       required: true,
@@ -62,6 +80,7 @@ const stockMovementSchema = new mongoose.Schema(
 
 stockMovementSchema.index({ storeId: 1, itemId: 1, createdAt: -1 });
 stockMovementSchema.index({ storeId: 1, itemId: 1, type: 1 });
+stockMovementSchema.index({ storeId: 1, sourceType: 1, sourceId: 1 });
 
 const StockMovement = mongoose.model('StockMovement', stockMovementSchema);
 export default StockMovement;

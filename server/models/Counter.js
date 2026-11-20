@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 export const ITEM_CODE_COUNTER_KEY = 'itemCode';
 export const ITEM_CODE_START_SEQ = 10000000;
+export const PURCHASE_NO_COUNTER_KEY = 'purchaseNo';
 
 const counterSchema = new mongoose.Schema(
   {
@@ -19,7 +20,7 @@ const counterSchema = new mongoose.Schema(
     seq: {
       type: Number,
       required: true,
-      default: ITEM_CODE_START_SEQ,
+      default: 0,
     },
   },
   {
@@ -33,4 +34,3 @@ counterSchema.index({ storeId: 1, key: 1 }, { unique: true });
 
 const Counter = mongoose.model('Counter', counterSchema);
 export default Counter;
-
