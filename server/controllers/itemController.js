@@ -191,6 +191,7 @@ export const itemController = {
         storeId: req.storeId,
         search,
         categoryId: req.query.categoryId || null,
+        brandId: req.query.brandId || null,
         pagination: req.query,
       });
 

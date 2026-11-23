@@ -13,7 +13,8 @@
     "test:customers": "node tests/customers.test.js",
     "test:items": "node tests/items.test.js",
     "test:categories": "node tests/categories.test.js",
-    "test:checklist": "node tests/checklist.test.js"
+    "test:brands": "node tests/brands.test.js",
+    "test:suppliers": "node tests/suppliers.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

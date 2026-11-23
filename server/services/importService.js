@@ -4,6 +4,7 @@ import path from 'path';
 import ImportBatch from '../models/ImportBatch.js';
 import Item from '../models/Item.js';
 import Category, { normalizeCategoryName } from '../models/Category.js';
+import Brand, { normalizeBrandName } from '../models/Brand.js';
 import PriceHistory from '../models/PriceHistory.js';
 import { scopeToStore } from '../middleware/auth.js';
 import { AppError } from '../utils/AppError.js';
@@ -141,10 +142,11 @@ export const importService = {
       throw new AppError('The uploaded file contains no data rows.', 400);
     }
 
-    // Load existing items and ACTIVE categories in this store for comparison & matching
-    const [existingItems, activeCategories] = await Promise.all([
+    // Load existing items, ACTIVE categories, and ACTIVE brands in this store for comparison & matching
+    const [existingItems, activeCategories, activeBrands] = await Promise.all([
       Item.find(scopeToStore({}, storeId)).lean().session(session || null),
       Category.find(scopeToStore({ isActive: true }, storeId)).lean().session(session || null),
+      Brand.find(scopeToStore({ isActive: true }, storeId)).lean().session(session || null),
     ]);
 
     const existingItemMap = new Map();
@@ -155,6 +157,11 @@ export const importService = {
     const activeCategoryMap = new Map();
     for (const cat of activeCategories) {
       activeCategoryMap.set(cat.nameKey, cat);
+    }
+
+    const activeBrandMap = new Map();
+    for (const brand of activeBrands) {
+      activeBrandMap.set(brand.nameKey, brand);
     }
 
     const processedRows = [];
@@ -216,6 +223,23 @@ export const importService = {
         normalized.category = '';
       }
 
+      // Brand matching against ACTIVE brands of the same store via nameKey
+      const rawBrand = (normalized.brand || '').trim();
+      if (rawBrand) {
+        const { nameKey } = normalizeBrandName(rawBrand);
+        const matchedBrand = activeBrandMap.get(nameKey);
+        if (!matchedBrand) {
+          errors.push(`Brand not found: ${rawBrand}. Add it in Brand Master first.`);
+          normalized.brandId = null;
+        } else {
+          normalized.brandId = String(matchedBrand._id);
+          normalized.brand = matchedBrand.name;
+        }
+      } else {
+        normalized.brandId = null;
+        normalized.brand = '';
+      }
+
       let result = 'error';
 
       if (errors.length > 0) {
@@ -243,9 +267,13 @@ export const importService = {
           const existingCatId = existing.categoryId ? String(existing.categoryId) : '';
           const categoryChanged = incomingCatId !== '' && incomingCatId !== existingCatId;
 
+          const incomingBrandId = normalized.brandId ? String(normalized.brandId) : '';
+          const existingBrandId = existing.brandId ? String(existing.brandId) : '';
+          const brandChanged = incomingBrandId !== '' && incomingBrandId !== existingBrandId;
+
           const specsChanged =
             normalized.name !== existing.name ||
-            normalized.brand !== (existing.brand || '') ||
+            brandChanged ||
             categoryChanged ||
             normalized.classSeries !== (existing.classSeries || '') ||
             normalized.size !== (existing.size || '') ||
@@ -376,7 +404,7 @@ export const importService = {
           productCode: data.productCode,
           codeSource: 'import',
           name: data.name,
-          brand: data.brand || '',
+          brandId: data.brandId || null,
           categoryId: data.categoryId || null,
           classSeries: data.classSeries || '',
           size: data.size || '',
@@ -441,7 +469,9 @@ export const importService = {
 
           // Update specs
           item.name = data.name;
-          item.brand = data.brand || item.brand;
+          if (data.brandId) {
+            item.brandId = data.brandId;
+          }
           if (data.categoryId) {
             item.categoryId = data.categoryId;
           }

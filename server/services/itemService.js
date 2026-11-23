@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Item from '../models/Item.js';
 import Category from '../models/Category.js';
+import Brand from '../models/Brand.js';
 import Counter, { ITEM_CODE_COUNTER_KEY, ITEM_CODE_START_SEQ } from '../models/Counter.js';
 import PriceHistory from '../models/PriceHistory.js';
 import StockMovement from '../models/StockMovement.js';
@@ -92,9 +93,34 @@ async function resolveActiveCategory({ storeId, categoryId, session = null }) {
 }
 
 /**
- * Format item doc to expose rupees, category { id, name }, and standard API fields.
+ * Validates that a brandId exists in the same store and is active.
+ * Returns the Brand document, or null if brandId is empty/null.
+ * Throws AppError 400 "Invalid brand" otherwise.
  */
-function formatItemForResponse(itemDoc, stockBalance = null, categoryDoc = null) {
+async function resolveActiveBrand({ storeId, brandId, session = null }) {
+  if (brandId === null || brandId === undefined || brandId === '') {
+    return null;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(String(brandId))) {
+    throw new AppError('Invalid brand', 400);
+  }
+
+  const brand = await Brand.findOne(
+    scopeToStore({ _id: brandId, isActive: true }, storeId)
+  ).session(session || null);
+
+  if (!brand) {
+    throw new AppError('Invalid brand', 400);
+  }
+
+  return brand;
+}
+
+/**
+ * Format item doc to expose rupees, category { id, name }, brand { id, name }, and standard API fields.
+ */
+function formatItemForResponse(itemDoc, stockBalance = null, categoryDoc = null, brandDoc = null) {
   if (!itemDoc) return null;
   const obj = itemDoc.toObject ? itemDoc.toObject() : { ...itemDoc };
 
@@ -118,6 +144,24 @@ function formatItemForResponse(itemDoc, stockBalance = null, categoryDoc = null)
   } else {
     obj.category = null;
     obj.categoryId = obj.categoryId || null;
+  }
+
+  // Format brand as { id, name } (or null if unset) and keep brandId as ID
+  if (obj.brandId && typeof obj.brandId === 'object' && obj.brandId._id) {
+    obj.brand = {
+      id: String(obj.brandId._id),
+      name: obj.brandId.name,
+    };
+    obj.brandId = obj.brandId._id;
+  } else if (brandDoc && brandDoc._id) {
+    obj.brand = {
+      id: String(brandDoc._id),
+      name: brandDoc.name,
+    };
+    obj.brandId = brandDoc._id;
+  } else {
+    obj.brand = null;
+    obj.brandId = obj.brandId || null;
   }
 
   if (stockBalance !== null && stockBalance !== undefined) {
@@ -186,7 +230,7 @@ export const itemService = {
     const {
       productCode,
       name,
-      brand = '',
+      brandId = null,
       categoryId = null,
       classSeries = '',
       size = '',
@@ -221,6 +265,9 @@ export const itemService = {
     // Validate categoryId if provided (must exist, belong to same store, and be active)
     const resolvedCategory = await resolveActiveCategory({ storeId, categoryId, session });
 
+    // Validate brandId if provided (must exist, belong to same store, and be active)
+    const resolvedBrand = await resolveActiveBrand({ storeId, brandId, session });
+
     const mrpPaise = toPaise(mrp);
     const sellingPricePaise = toPaise(sellingPrice);
 
@@ -230,7 +277,7 @@ export const itemService = {
         productCode: code,
         codeSource,
         name: name.trim(),
-        brand: brand.trim(),
+        brandId: resolvedBrand ? resolvedBrand._id : null,
         categoryId: resolvedCategory ? resolvedCategory._id : null,
         classSeries: classSeries.trim(),
         size: size.trim(),
@@ -334,7 +381,7 @@ export const itemService = {
       reason: isAutoCode ? 'Auto-coded in-house item creation' : 'Manual item creation',
     });
 
-    return formatItemForResponse(item, 0, resolvedCategory);
+    return formatItemForResponse(item, 0, resolvedCategory, resolvedBrand);
   },
 
   /**
@@ -376,10 +423,28 @@ export const itemService = {
       }
     }
 
+    // Validate brandId change if provided
+    if (updateData.brandId !== undefined) {
+      const incoming = updateData.brandId;
+      if (incoming === null || incoming === '') {
+        item.brandId = null;
+      } else {
+        const currentBrandId = item.brandId ? String(item.brandId) : '';
+        if (String(incoming) !== currentBrandId) {
+          // Changing brand: must exist, belong to same store, and be active
+          const resolvedBrand = await resolveActiveBrand({
+            storeId,
+            brandId: incoming,
+            session,
+          });
+          item.brandId = resolvedBrand._id;
+        }
+      }
+    }
+
     // Whitelist non-price fields
     const allowedFields = [
       'name',
-      'brand',
       'classSeries',
       'size',
       'length',
@@ -421,6 +486,7 @@ export const itemService = {
     });
 
     await item.populate('categoryId', 'name');
+    await item.populate('brandId', 'name');
     const balance = await stockService.getStockBalance(storeId, item._id, session);
     return formatItemForResponse(item, balance);
   },
@@ -473,6 +539,7 @@ export const itemService = {
     });
 
     await item.populate('categoryId', 'name');
+    await item.populate('brandId', 'name');
     const balance = await stockService.getStockBalance(storeId, item._id, session);
     return formatItemForResponse(item, balance);
   },
@@ -514,16 +581,18 @@ export const itemService = {
     });
 
     await item.populate('categoryId', 'name');
+    await item.populate('brandId', 'name');
     const balance = await stockService.getStockBalance(storeId, item._id, session);
     return formatItemForResponse(item, balance);
   },
 
   /**
-   * Retrieves single item with stock balance and populated category { id, name }.
+   * Retrieves single item with stock balance and populated category { id, name } and brand { id, name }.
    */
   async getItemById({ storeId, itemId, session = null }) {
     const item = await Item.findOne(scopeToStore({ _id: itemId }, storeId))
       .populate('categoryId', 'name')
+      .populate('brandId', 'name')
       .session(session || null);
     if (!item) {
       throw new AppError('Item not found in this store', 404);
@@ -543,11 +612,15 @@ export const itemService = {
     if (filters.search && filters.search.trim()) {
       const term = filters.search.trim();
       const regex = new RegExp(term, 'i');
-      query.$or = [{ productCode: regex }, { name: regex }, { brand: regex }];
+      query.$or = [{ productCode: regex }, { name: regex }];
     }
 
-    if (filters.brand) {
-      query.brand = new RegExp(`^${filters.brand.trim()}$`, 'i');
+    if (filters.brandId && String(filters.brandId).trim()) {
+      const rawBrandId = String(filters.brandId).trim();
+      if (!mongoose.Types.ObjectId.isValid(rawBrandId)) {
+        throw new AppError('Invalid brand', 400);
+      }
+      query.brandId = new mongoose.Types.ObjectId(rawBrandId);
     }
     if (filters.categoryId && String(filters.categoryId).trim()) {
       const rawCategoryId = String(filters.categoryId).trim();
@@ -569,6 +642,7 @@ export const itemService = {
     const [items, total] = await Promise.all([
       Item.find(scopedQuery)
         .populate('categoryId', 'name')
+        .populate('brandId', 'name')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -592,15 +666,15 @@ export const itemService = {
 
   /**
    * Search for active items (salesman & admin billing lookup).
-   * Only returns ACTIVE items. Page size max 20. Supports optional categoryId filter.
+   * Only returns ACTIVE items. Page size max 20. Supports optional categoryId and brandId filters.
    */
-  async searchActiveItems({ storeId, search = '', categoryId = null, pagination = {}, session = null }) {
+  async searchActiveItems({ storeId, search = '', categoryId = null, brandId = null, pagination = {}, session = null }) {
     const query = { status: 'active' };
 
     if (search && search.trim()) {
       const term = search.trim();
       const regex = new RegExp(term, 'i');
-      query.$or = [{ productCode: regex }, { name: regex }, { brand: regex }];
+      query.$or = [{ productCode: regex }, { name: regex }];
     }
 
     const rawCatId = categoryId || pagination.categoryId;
@@ -612,6 +686,15 @@ export const itemService = {
       query.categoryId = new mongoose.Types.ObjectId(cleanCatId);
     }
 
+    const rawBrandId = brandId || pagination.brandId;
+    if (rawBrandId && String(rawBrandId).trim()) {
+      const cleanBrandId = String(rawBrandId).trim();
+      if (!mongoose.Types.ObjectId.isValid(cleanBrandId)) {
+        throw new AppError('Invalid brand', 400);
+      }
+      query.brandId = new mongoose.Types.ObjectId(cleanBrandId);
+    }
+
     const scopedQuery = scopeToStore(query, storeId);
 
     const page = Math.max(1, parseInt(pagination.page, 10) || 1);
@@ -621,6 +704,7 @@ export const itemService = {
     const [items, total] = await Promise.all([
       Item.find(scopedQuery)
         .populate('categoryId', 'name')
+        .populate('brandId', 'name')
         .sort({ name: 1 })
         .skip(skip)
         .limit(limit)

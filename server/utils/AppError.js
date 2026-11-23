@@ -9,9 +9,12 @@ export class AppError extends Error {
     this.isOperational = true;
     Object.assign(this, extra);
 
+    if (typeof details === 'object' && details !== null) {
+      Object.assign(this, details);
+    }
+
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
 export default AppError;
-
