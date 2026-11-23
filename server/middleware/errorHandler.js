@@ -8,10 +8,13 @@ import { AppError } from '../utils/AppError.js';
 export function errorHandler(err, req, res, next) {
   // Operational errors created via AppError
   if (err instanceof AppError || err.isOperational) {
-    return res.status(err.statusCode || 400).json({
+    const payload = {
       success: false,
       message: err.message,
-    });
+    };
+    if (err.warning) payload.warning = err.warning;
+    if (err.duplicates) payload.duplicates = err.duplicates;
+    return res.status(err.statusCode || 400).json(payload);
   }
 
   // MongoDB Duplicate Key Error (E11000)
