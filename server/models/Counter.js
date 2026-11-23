@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 export const ITEM_CODE_COUNTER_KEY = 'itemCode';
 export const ITEM_CODE_START_SEQ = 10000000;
 
+export const CUSTOMER_CODE_COUNTER_KEY = 'customerCode';
+export const CUSTOMER_CODE_START_SEQ = 0;
+
 const counterSchema = new mongoose.Schema(
   {
     storeId: {

@@ -11,6 +11,9 @@ import Brand, { normalizeBrandName } from '../models/Brand.js';
 import Supplier, { normalizeSupplierName } from '../models/Supplier.js';
 import Item from '../models/Item.js';
 import PriceHistory from '../models/PriceHistory.js';
+import Customer, { normalizeIndianMobile } from '../models/Customer.js';
+import CustomerCreditHistory from '../models/CustomerCreditHistory.js';
+import Counter, { CUSTOMER_CODE_COUNTER_KEY } from '../models/Counter.js';
 import auditService from './auditService.js';
 import { toPaise } from '../utils/money.js';
 
@@ -309,33 +312,127 @@ export async function seedInitialData() {
     }
   }
 
-  // 6. Seed Sample Supplier for Main Store (Idempotent)
-  // Main Store: one sample supplier "Sample Pipe Distributors", mobile 9876500001, city Pune, creditDays 30.
-  const sampleSupplierName = 'Sample Pipe Distributors';
-  const { nameKey: supplierNameKey } = normalizeSupplierName(sampleSupplierName);
-  let supplier = await Supplier.findOne({ storeId: mainStore._id, nameKey: supplierNameKey });
-  if (!supplier) {
-    await Supplier.create({
-      storeId: mainStore._id,
-      name: sampleSupplierName,
-      nameKey: supplierNameKey,
-      mobile: '9876500001',
-      address: {
-        city: 'Pune',
-      },
-      creditDays: 30,
-      isActive: true,
-      createdBy: seedActor,
-      updatedBy: seedActor,
-    });
-  } else {
-    supplier.mobile = supplier.mobile || '9876500001';
-    supplier.address = supplier.address || {};
-    supplier.address.city = supplier.address.city || 'Pune';
-    supplier.creditDays = supplier.creditDays ?? 30;
-    supplier.isActive = true;
-    await supplier.save();
+  // 5. Seed 5 Sample Customers (mix of No credit and credit customers) for mainStore
+  // Ensure legacy customerCode unique index (if present in DB from earlier schemas) is safely dropped
+  try {
+    const custIndexes = await Customer.collection.indexes();
+    if (custIndexes.some((idx) => idx.name === 'storeId_1_customerCode_1')) {
+      await Customer.collection.dropIndex('storeId_1_customerCode_1');
+    }
+  } catch {
+    // Ignore if collection does not exist yet
   }
+
+  const customersToSeed = [
+    {
+      customerCode: 'CUS-00001',
+      name: 'Ramesh Sharma',
+      mobile: '+91 98201 12233',
+      locality: 'Andheri West',
+      businessName: '',
+      gstNumber: '',
+      creditEnabled: false,
+      creditLimitPaise: null,
+      creditDays: null,
+    },
+    {
+      customerCode: 'CUS-00002',
+      name: 'Pooja Patel',
+      mobile: '09820223344',
+      locality: 'Borivali East',
+      businessName: '',
+      gstNumber: '',
+      creditEnabled: false,
+      creditLimitPaise: null,
+      creditDays: null,
+    },
+    {
+      customerCode: 'CUS-00003',
+      name: 'Gupta Hardware & Sanitary',
+      mobile: '9820334455',
+      locality: 'Dadar Market',
+      businessName: 'Gupta Hardware Pvt Ltd',
+      gstNumber: '27AAAAA1234A1Z5',
+      creditEnabled: true,
+      creditLimitPaise: 5000000, // Rs 50,000.00
+      creditDays: 30,
+    },
+    {
+      customerCode: 'CUS-00004',
+      name: 'Shree Krishna Electricals',
+      mobile: '+91-98204-45566',
+      locality: 'Kurla West',
+      businessName: 'Shree Krishna Trading Co',
+      gstNumber: '27BBBBB5678B1Z2',
+      creditEnabled: true,
+      creditLimitPaise: 10000000, // Rs 100,000.00
+      creditDays: 45,
+    },
+    {
+      customerCode: 'CUS-00005',
+      name: 'Amit Verma',
+      mobile: '9820556677',
+      locality: 'Thane West',
+      businessName: '',
+      gstNumber: '',
+      creditEnabled: true,
+      creditLimitPaise: 2500000, // Rs 25,000.00
+      creditDays: 15,
+    },
+  ];
+
+  for (const cData of customersToSeed) {
+    const { normalizedMobile } = normalizeIndianMobile(cData.mobile);
+    let customer = await Customer.findOne({
+      storeId: mainStore._id,
+      normalizedMobile,
+    });
+
+    if (!customer) {
+      customer = await Customer.create({
+        storeId: mainStore._id,
+        customerCode: cData.customerCode,
+        name: cData.name,
+        mobile: cData.mobile,
+        normalizedMobile,
+        locality: cData.locality,
+        businessName: cData.businessName,
+        gstNumber: cData.gstNumber,
+        creditEnabled: cData.creditEnabled,
+        creditLimitPaise: cData.creditLimitPaise,
+        creditDays: cData.creditDays,
+        isActive: true,
+        createdBy: seedActor,
+        updatedBy: seedActor,
+      });
+
+      if (cData.creditEnabled) {
+        await CustomerCreditHistory.create({
+          customerId: customer._id,
+          storeId: mainStore._id,
+          oldCreditEnabled: false,
+          newCreditEnabled: true,
+          oldCreditLimitPaise: null,
+          newCreditLimitPaise: cData.creditLimitPaise,
+          oldCreditDays: null,
+          newCreditDays: cData.creditDays,
+          changedBy: seedActor,
+          changedAt: new Date(),
+          reason: 'Initial seed credit configuration',
+        });
+      }
+    } else if (!customer.customerCode) {
+      customer.customerCode = cData.customerCode;
+      await customer.save();
+    }
+  }
+
+  // Ensure Customer Code Counter is synchronized to at least 5
+  await Counter.findOneAndUpdate(
+    { storeId: mainStore._id, key: CUSTOMER_CODE_COUNTER_KEY },
+    { $max: { seq: 5 } },
+    { upsert: true }
+  );
 }
 
 // Standalone execution support: node server/services/seedService.js

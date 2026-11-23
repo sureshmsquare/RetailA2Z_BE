@@ -12,9 +12,8 @@ export function errorHandler(err, req, res, next) {
       success: false,
       message: err.message,
     };
-    if (err.code) payload.code = err.code;
-    if (err.otherSupplierName) payload.otherSupplierName = err.otherSupplierName;
-    if (err.details) payload.details = err.details;
+    if (err.warning) payload.warning = err.warning;
+    if (err.duplicates) payload.duplicates = err.duplicates;
     return res.status(err.statusCode || 400).json(payload);
   }
 
