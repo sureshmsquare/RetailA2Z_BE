@@ -9,12 +9,13 @@
     "dev": "node --watch server.js",
     "seed": "node server/services/seedService.js",
     "migrate:categories": "node scripts/migrateItemCategories.js",
-    "test": "node tests/checklist.test.js && node tests/items.test.js && node tests/categories.test.js && node tests/customers.test.js",
-    "test:customers": "node tests/customers.test.js",
+    "test": "node tests/auth.test.js && node tests/items.test.js && node tests/categories.test.js && node tests/customers.test.js && node tests/stock.test.js && node tests/userIsolation.test.js",
+    "test:auth": "node tests/auth.test.js",
     "test:items": "node tests/items.test.js",
     "test:categories": "node tests/categories.test.js",
-    "test:brands": "node tests/brands.test.js",
-    "test:suppliers": "node tests/suppliers.test.js"
+    "test:customers": "node tests/customers.test.js",
+    "test:stock": "node tests/stock.test.js",
+    "test:users": "node tests/userIsolation.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

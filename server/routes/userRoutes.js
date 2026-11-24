@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import userController from '../controllers/userController.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, requireStoreAccess } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 
 const router = Router();
 
-// All user management routes require admin role
-router.use(authenticate, authorize('admin'));
+// All user management routes require admin role and verified store access
+router.use(authenticate, authorize('admin'), requireStoreAccess);
 
 // POST /api/users - Create user
 router.post(
@@ -23,6 +23,9 @@ router.post(
 
 // GET /api/users - List users
 router.get('/', userController.listUsers);
+
+// GET /api/users/:id - View user details
+router.get('/:id', userController.getUserById);
 
 // PATCH /api/users/:id - Edit name, role, storeIds
 router.patch(

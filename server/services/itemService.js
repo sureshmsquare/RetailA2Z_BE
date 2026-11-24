@@ -13,6 +13,10 @@ import stockService from './stockService.js';
 
 const MAX_CODE_GEN_ATTEMPTS = 20;
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Formats a numeric sequence into an 8-digit zero-padded string (e.g. "10000001").
  */
@@ -665,15 +669,120 @@ export const itemService = {
   },
 
   /**
+   * Resolves an item by product code exactly (trimmed, case-insensitive) within the store.
+   * Scoped to storeId.
+   *
+   * Return status:
+   *  - "matched"   -> exactly one active, priced item
+   *  - "ambiguous" -> more than one item/variant shares this code; returns candidates (id, name, code, size/length/variant, unit)
+   *  - "inactive"  -> item exists but is inactive or unpriced; do not allow use
+   *  - "not_found" -> no item with this code in this store
+   *
+   * Reusable for billing lookup endpoint and draft parser.
+   */
+  async resolveItemByCode(storeIdOrOptions, codeParam = null, options = {}) {
+    let storeId;
+    let code;
+    let session;
+
+    if (
+      typeof storeIdOrOptions === 'object' &&
+      storeIdOrOptions !== null &&
+      !storeIdOrOptions._bsontype &&
+      !(storeIdOrOptions instanceof mongoose.Types.ObjectId)
+    ) {
+      storeId = storeIdOrOptions.storeId;
+      code = storeIdOrOptions.code;
+      session = storeIdOrOptions.session || null;
+    } else {
+      storeId = storeIdOrOptions;
+      code = codeParam;
+      session = options?.session || null;
+    }
+
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      return {
+        status: 'not_found',
+        item: null,
+        candidates: [],
+      };
+    }
+
+    const cleanCode = code.trim();
+    const exactRegex = new RegExp(`^${escapeRegex(cleanCode)}$`, 'i');
+    const scopedQuery = scopeToStore({ productCode: exactRegex }, storeId);
+
+    const items = await Item.find(scopedQuery)
+      .populate('categoryId', 'name')
+      .populate('brandId', 'name')
+      .session(session || null);
+
+    if (!items || items.length === 0) {
+      return {
+        status: 'not_found',
+        item: null,
+        candidates: [],
+      };
+    }
+
+    if (items.length > 1) {
+      const candidates = items.map((i) => ({
+        id: String(i._id),
+        _id: i._id,
+        name: i.name,
+        code: i.productCode,
+        productCode: i.productCode,
+        size: i.size || '',
+        length: i.length || '',
+        variant: i.variant || '',
+        unit: i.sellingUnit || 'PCS',
+        sellingUnit: i.sellingUnit || 'PCS',
+        status: i.status,
+      }));
+
+      return {
+        status: 'ambiguous',
+        item: null,
+        candidates,
+      };
+    }
+
+    const item = items[0];
+    const isActive = item.status === 'active';
+    const isPriced =
+      item.sellingPricePaise !== null &&
+      item.sellingPricePaise !== undefined &&
+      Number(item.sellingPricePaise) > 0;
+
+    if (!isActive || !isPriced) {
+      return {
+        status: 'inactive',
+        item: null,
+        candidates: [],
+      };
+    }
+
+    const stockMap = await stockService.getStockBalances(storeId, [item._id], session);
+    const formatted = formatItemForResponse(item, stockMap[String(item._id)] || 0);
+
+    return {
+      status: 'matched',
+      item: formatted,
+      candidates: [],
+    };
+  },
+
+  /**
    * Search for active items (salesman & admin billing lookup).
    * Only returns ACTIVE items. Page size max 20. Supports optional categoryId and brandId filters.
+   * If search matches a productCode exactly (case-insensitive), that exact match is returned FIRST.
    */
   async searchActiveItems({ storeId, search = '', categoryId = null, brandId = null, pagination = {}, session = null }) {
     const query = { status: 'active' };
 
-    if (search && search.trim()) {
-      const term = search.trim();
-      const regex = new RegExp(term, 'i');
+    const cleanSearch = (search || '').trim();
+    if (cleanSearch) {
+      const regex = new RegExp(escapeRegex(cleanSearch), 'i');
       query.$or = [{ productCode: regex }, { name: regex }];
     }
 
@@ -701,16 +810,80 @@ export const itemService = {
     const limit = Math.min(20, Math.max(1, parseInt(pagination.limit, 10) || 20));
     const skip = (page - 1) * limit;
 
-    const [items, total] = await Promise.all([
-      Item.find(scopedQuery)
-        .populate('categoryId', 'name')
-        .populate('brandId', 'name')
-        .sort({ name: 1 })
-        .skip(skip)
-        .limit(limit)
-        .session(session || null),
-      Item.countDocuments(scopedQuery).session(session || null),
-    ]);
+    let items = [];
+    let total = 0;
+
+    // Check if query exactly equals any productCode in this store
+    if (cleanSearch) {
+      const exactCodeRegex = new RegExp(`^${escapeRegex(cleanSearch)}$`, 'i');
+      const exactCodeQuery = { ...scopedQuery, productCode: exactCodeRegex };
+      delete exactCodeQuery.$or;
+
+      const [exactMatches, totalCount] = await Promise.all([
+        Item.find(exactCodeQuery)
+          .populate('categoryId', 'name')
+          .populate('brandId', 'name')
+          .sort({ name: 1 })
+          .session(session || null),
+        Item.countDocuments(scopedQuery).session(session || null),
+      ]);
+
+      total = totalCount;
+
+      if (exactMatches.length > 0) {
+        // We have exact productCode match(es) that should appear FIRST
+        const exactMatchIds = exactMatches.map((m) => m._id);
+        const otherItemsQuery = { ...scopedQuery, _id: { $nin: exactMatchIds } };
+
+        if (page === 1) {
+          const exactOnFirstPage = exactMatches.slice(0, limit);
+          const remainingSlots = limit - exactOnFirstPage.length;
+
+          let otherItems = [];
+          if (remainingSlots > 0) {
+            otherItems = await Item.find(otherItemsQuery)
+              .populate('categoryId', 'name')
+              .populate('brandId', 'name')
+              .sort({ name: 1 })
+              .limit(remainingSlots)
+              .session(session || null);
+          }
+          items = [...exactOnFirstPage, ...otherItems];
+        } else {
+          // If page > 1, shift offset by the number of exact matches placed on earlier page(s)
+          const adjustedSkip = skip - exactMatches.length;
+          const otherItems = await Item.find(otherItemsQuery)
+            .populate('categoryId', 'name')
+            .populate('brandId', 'name')
+            .sort({ name: 1 })
+            .skip(Math.max(0, adjustedSkip))
+            .limit(limit)
+            .session(session || null);
+          items = otherItems;
+        }
+      } else {
+        items = await Item.find(scopedQuery)
+          .populate('categoryId', 'name')
+          .populate('brandId', 'name')
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limit)
+          .session(session || null);
+      }
+    } else {
+      const [fetchedItems, totalCount] = await Promise.all([
+        Item.find(scopedQuery)
+          .populate('categoryId', 'name')
+          .populate('brandId', 'name')
+          .sort({ name: 1 })
+          .skip(skip)
+          .limit(limit)
+          .session(session || null),
+        Item.countDocuments(scopedQuery).session(session || null),
+      ]);
+      items = fetchedItems;
+      total = totalCount;
+    }
 
     const itemIds = items.map((i) => i._id);
     const stockMap = await stockService.getStockBalances(storeId, itemIds, session);

@@ -18,7 +18,8 @@ const router = Router();
 // All item endpoints require authenticated user and verified store context
 router.use(authenticate, requireStoreAccess);
 
-// 1. Active Item Search (Admin + Salesman) & Preview Next Code (Admin only) - defined BEFORE /:id
+// 1. Active Item Search & Lookup (Admin + Salesman) & Preview Next Code (Admin only) - defined BEFORE /:id
+router.get('/lookup', authorize('admin', 'salesman'), itemController.lookupItemByCode);
 router.get('/search', authorize('admin', 'salesman'), itemController.searchItems);
 router.get('/next-code', authorize('admin'), itemController.getNextProductCode);
 

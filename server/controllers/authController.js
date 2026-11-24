@@ -8,7 +8,7 @@ export const authController = {
    * POST /api/auth/login
    * Body: { identifier, password } (identifier = email OR 10-digit mobile)
    */
-  async login(req, res) {
+  async login(req, res, next) {
     try {
       const { identifier, password } = req.body;
 
@@ -108,82 +108,90 @@ export const authController = {
         },
       });
     } catch (error) {
-      console.error('[AuthController.login error]', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Internal server error during login.',
-      });
+      next(error);
     }
   },
 
   /**
    * POST /api/auth/logout
    */
-  async logout(req, res) {
-    if (res.clearCookie) {
-      res.clearCookie('token');
+  async logout(req, res, next) {
+    try {
+      if (res.clearCookie) {
+        res.clearCookie('token');
+      }
+      return res.status(200).json({
+        success: true,
+        message: 'Logged out successfully.',
+      });
+    } catch (error) {
+      next(error);
     }
-    return res.status(200).json({
-      success: true,
-      message: 'Logged out successfully.',
-    });
   },
 
   /**
    * GET /api/auth/me
    * Returns logged-in user with assigned stores (used on page refresh)
    */
-  async me(req, res) {
-    const user = req.user;
+  async me(req, res, next) {
+    try {
+      const user = req.user;
 
-    const stores = (user.storeIds || []).map((s) => ({
-      id: s._id ? s._id.toString() : s.toString(),
-      name: s.name,
-      address: s.address,
-      timezone: s.timezone,
-      isActive: s.isActive,
-    }));
+      const stores = (user.storeIds || []).map((s) => ({
+        id: s._id ? s._id.toString() : s.toString(),
+        name: s.name,
+        address: s.address,
+        timezone: s.timezone,
+        isActive: s.isActive,
+      }));
 
-    return res.status(200).json({
-      success: true,
-      user: {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        role: user.role,
-        isActive: user.isActive,
-        lastLoginAt: user.lastLoginAt,
-        stores,
-      },
-    });
+      return res.status(200).json({
+        success: true,
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          mobile: user.mobile,
+          role: user.role,
+          isActive: user.isActive,
+          lastLoginAt: user.lastLoginAt,
+          stores,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
   },
 
   /**
    * POST /api/auth/refresh
    * Sliding session: issues a fresh token if current session/token is valid
    */
-  async refresh(req, res) {
-    const user = req.user;
-    const freshToken = generateToken(user);
+  async refresh(req, res, next) {
+    try {
+      const user = req.user;
+      const freshToken = generateToken(user);
 
-    const stores = (user.storeIds || []).map((s) => ({
-      id: s._id ? s._id.toString() : s.toString(),
-      name: s.name,
-    }));
+      const stores = (user.storeIds || []).map((s) => ({
+        id: s._id ? s._id.toString() : s.toString(),
+        name: s.name,
+      }));
 
-    return res.status(200).json({
-      success: true,
-      token: freshToken,
-      user: {
-        id: user._id.toString(),
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        role: user.role,
-        stores,
-      },
-    });
+      return res.status(200).json({
+        success: true,
+        token: freshToken,
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          mobile: user.mobile,
+          role: user.role,
+          stores,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
   },
 };
 

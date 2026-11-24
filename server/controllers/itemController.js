@@ -181,6 +181,60 @@ export const itemController = {
   },
 
   /**
+   * GET /api/items/lookup?code=<code>
+   * Admin and Salesman
+   * Scoped to req.storeId. Exact code match with role-based price masking.
+   */
+  async lookupItemByCode(req, res, next) {
+    try {
+      const code = typeof req.query.code === 'string' ? req.query.code : '';
+      const result = await itemService.resolveItemByCode(req.storeId, code);
+
+      const role = req.user?.role;
+      const serializedItem = result.item ? serializeItemForRole(result.item, role) : null;
+      const serializedCandidates = (result.candidates || []).map((c) =>
+        serializeItemForRole(c, role)
+      );
+
+      const responsePayload = {
+        success: true,
+        status: result.status,
+      };
+
+      if (result.status === 'matched') {
+        responsePayload.item = serializedItem;
+        responsePayload.data = {
+          status: result.status,
+          item: serializedItem,
+          ...serializedItem,
+        };
+      } else if (result.status === 'ambiguous') {
+        responsePayload.candidates = serializedCandidates;
+        responsePayload.data = {
+          status: result.status,
+          candidates: serializedCandidates,
+        };
+      } else if (result.status === 'inactive') {
+        responsePayload.message = 'Item exists but is inactive or unpriced';
+        responsePayload.data = {
+          status: result.status,
+          message: 'Item exists but is inactive or unpriced',
+        };
+      } else {
+        responsePayload.message = 'No item with this code in this store';
+        responsePayload.data = {
+          status: result.status,
+          message: 'No item with this code in this store',
+        };
+      }
+
+      return res.status(200).json(responsePayload);
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  /**
    * GET /api/items/search
    * Admin and Salesman
    */
