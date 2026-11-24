@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Supplier, { normalizeSupplierName } from '../models/Supplier.js';
+import Purchase from '../models/Purchase.js';
 import { normalizeIndianMobile } from '../utils/phone.js';
 import { scopeToStore } from '../middleware/auth.js';
 import { AppError } from '../utils/AppError.js';
@@ -65,11 +66,13 @@ function getChangedFields(before, after) {
 export const supplierService = {
   /**
    * Returns the usage count of a supplier across the system.
-   * TODO: Purchases (and payments) must be counted here when those modules are built.
+   * Counts purchases of that supplier in ANY status (draft, posted, cancelled).
    */
   async getSupplierUsageCount(storeId, supplierId, session = null) {
-    // TODO: Purchases (and payments) must be counted here when those modules are built.
-    return 0;
+    const purchaseCount = await Purchase.countDocuments(
+      scopeToStore({ supplierId }, storeId)
+    ).session(session || null);
+    return purchaseCount;
   },
 
   /**

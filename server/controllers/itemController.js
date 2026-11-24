@@ -292,7 +292,7 @@ export const itemController = {
    */
   async getStockMovements(req, res, next) {
     try {
-      const movements = await stockService.getStockMovements({
+      const movements = await itemService.getStockMovements({
         storeId: req.storeId,
         itemId: req.params.id,
       });

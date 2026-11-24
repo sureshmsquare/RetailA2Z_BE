@@ -9,6 +9,7 @@
     "dev": "node --watch server.js",
     "seed": "node server/services/seedService.js",
     "migrate:categories": "node scripts/migrateItemCategories.js",
+    "migrate:brands": "node scripts/migrateItemBrands.js",
     "test": "node tests/auth.test.js && node tests/items.test.js && node tests/categories.test.js && node tests/customers.test.js && node tests/stock.test.js && node tests/userIsolation.test.js",
     "test:auth": "node tests/auth.test.js",
     "test:items": "node tests/items.test.js",
