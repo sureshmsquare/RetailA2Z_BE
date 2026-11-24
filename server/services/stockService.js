@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import StockMovement from '../models/StockMovement.js';
 import Item from '../models/Item.js';
+import Purchase from '../models/Purchase.js';
 import { scopeToStore } from '../middleware/auth.js';
 import { AppError } from '../utils/AppError.js';
 import auditService from './auditService.js';
@@ -38,7 +39,7 @@ export const stockService = {
     ];
 
     const result = await StockMovement.aggregate(pipeline).session(session || null);
-    return result.length > 0 ? result[0].balance : 0;
+    return result.length > 0 ? Math.round(Number(result[0].balance) * 1000) / 1000 : 0;
   },
 
   /**
@@ -78,7 +79,7 @@ export const stockService = {
     }
 
     for (const row of results) {
-      balanceMap[String(row._id)] = row.balance;
+      balanceMap[String(row._id)] = Math.round(Number(row.balance) * 1000) / 1000;
     }
 
     return balanceMap;
@@ -118,6 +119,8 @@ export const stockService = {
       storeId,
       itemId,
       type: 'OPENING',
+      sourceType: 'Opening',
+      sourceId: item._id,
       quantityBase: qty,
       effectiveDate: effectiveDate || new Date(),
       reference: reference || 'Initial Opening Stock',
@@ -193,6 +196,8 @@ export const stockService = {
       storeId,
       itemId,
       type: 'ADJUSTMENT',
+      sourceType: 'Adjustment',
+      sourceId: item._id,
       quantityBase: qty,
       effectiveDate: effectiveDate || new Date(),
       reference: reference || 'Stock Adjustment',
@@ -222,11 +227,42 @@ export const stockService = {
 
   /**
    * Retrieves chronological stock movements for an item in a store.
+   * Includes sourceType, sourceId, and for purchase movements: purchaseNumber & supplier name.
    */
   async getStockMovements({ storeId, itemId, session = null }) {
-    return StockMovement.find(scopeToStore({ itemId }, storeId))
+    const rawMovements = await StockMovement.find(scopeToStore({ itemId }, storeId))
       .sort({ createdAt: -1 })
-      .session(session || null);
+      .session(session || null)
+      .lean();
+
+    const purchaseIds = rawMovements
+      .filter((m) => (m.sourceType === 'Purchase' || m.sourceType === 'PurchaseCancel') && m.sourceId)
+      .map((m) => m.sourceId);
+
+    const purchaseMap = new Map();
+    if (purchaseIds.length > 0) {
+      const purchases = await Purchase.find({ _id: { $in: purchaseIds } })
+        .populate('supplierId', 'name')
+        .lean()
+        .session(session || null);
+
+      for (const p of purchases) {
+        purchaseMap.set(String(p._id), p);
+      }
+    }
+
+    return rawMovements.map((m) => {
+      const doc = { ...m, id: String(m._id) };
+      if (m.sourceType === 'Purchase' || m.sourceType === 'PurchaseCancel') {
+        const p = m.sourceId ? purchaseMap.get(String(m.sourceId)) : null;
+        doc.purchaseNumber = p ? p.purchaseNumber : null;
+        doc.supplierName = p?.supplierId?.name || null;
+        doc.supplier = p?.supplierId
+          ? { id: String(p.supplierId._id || p.supplierId.id), name: p.supplierId.name }
+          : null;
+      }
+      return doc;
+    });
   },
 };
 

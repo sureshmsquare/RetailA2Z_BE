@@ -746,6 +746,14 @@ export const itemService = {
       return obj;
     });
   },
+
+  /**
+   * Retrieves chronological stock movements for an item in a store.
+   * Includes sourceType, sourceId, and for purchase movements: purchaseNumber & supplier name.
+   */
+  async getStockMovements({ storeId, itemId, session = null }) {
+    return stockService.getStockMovements({ storeId, itemId, session });
+  },
 };
 
 export default itemService;
