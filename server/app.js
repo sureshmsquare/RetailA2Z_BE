@@ -11,6 +11,8 @@ import itemRoutes from './routes/itemRoutes.js';
 import stockRoutes from './routes/stockRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
+import billingRoutes from './routes/billingRoutes.js';
+import salesRoutes from './routes/salesRoutes.js';
 import { authenticate, requireStoreAccess, scopeToStore } from './middleware/auth.js';
 import errorHandler from './middleware/errorHandler.js';
 
@@ -49,6 +51,8 @@ app.use('/api/items', itemRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/billing', billingRoutes);
+app.use('/api/sales', salesRoutes);
 
 // Store-scoped endpoint for testing store isolation & scopeToStore helper
 app.get('/api/test/store-scoped', authenticate, requireStoreAccess, (req, res) => {

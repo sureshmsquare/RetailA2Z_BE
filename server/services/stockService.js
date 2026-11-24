@@ -39,7 +39,7 @@ export const stockService = {
     ];
 
     const result = await StockMovement.aggregate(pipeline).session(session || null);
-    return result.length > 0 ? result[0].balance : 0;
+    return result.length > 0 ? Math.round(Number(result[0].balance) * 1000) / 1000 : 0;
   },
 
   /**
@@ -79,7 +79,7 @@ export const stockService = {
     }
 
     for (const row of results) {
-      balanceMap[String(row._id)] = row.balance;
+      balanceMap[String(row._id)] = Math.round(Number(row.balance) * 1000) / 1000;
     }
 
     return balanceMap;

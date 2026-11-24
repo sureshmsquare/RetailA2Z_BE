@@ -46,7 +46,7 @@ const stockMovementSchema = new mongoose.Schema(
     },
     sourceType: {
       type: String,
-      enum: ['Purchase', 'PurchaseCancel', 'Opening', 'Adjustment', null],
+      enum: ['Purchase', 'PurchaseCancel', 'Opening', 'Adjustment', 'Sale', 'Invoice', null],
       default: null,
     },
     sourceId: {

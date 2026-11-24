@@ -16,7 +16,8 @@
     "test:brands": "node tests/brands.test.js",
     "test:suppliers": "node tests/suppliers.test.js",
     "test:purchases": "node tests/purchases.test.js",
-    "test:customers": "node tests/customers.test.js"
+    "test:customers": "node tests/customers.test.js",
+    "test:billing": "node tests/billing.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

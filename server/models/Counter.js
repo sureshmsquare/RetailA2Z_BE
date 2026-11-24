@@ -7,6 +7,9 @@ export const PURCHASE_NO_COUNTER_KEY = 'purchaseNo';
 export const CUSTOMER_CODE_COUNTER_KEY = 'customerCode';
 export const CUSTOMER_CODE_START_SEQ = 0;
 
+export const INVOICE_NO_COUNTER_KEY = 'invoiceNo';
+export const RECEIPT_NO_COUNTER_KEY = 'receiptNo';
+
 const counterSchema = new mongoose.Schema(
   {
     storeId: {

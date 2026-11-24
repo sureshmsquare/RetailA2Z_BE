@@ -17,6 +17,7 @@ export function errorHandler(err, req, res, next) {
     if (err.details) payload.details = err.details;
     if (err.warning) payload.warning = err.warning;
     if (err.duplicates) payload.duplicates = err.duplicates;
+    if (err.draft) payload.draft = err.draft;
     return res.status(err.statusCode || 400).json(payload);
   }
 
