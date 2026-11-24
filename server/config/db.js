@@ -5,7 +5,7 @@ export async function connectDB(uri) {
     let mongoUri = uri;
     if (!mongoUri) {
       if (process.env.NODE_ENV === 'test') {
-        mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI;
+        mongoUri = process.env.MONGO_URI_TEST || process.env.MONGO_URI || process.env.MONGODB_URI;
       } else {
         mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
       }

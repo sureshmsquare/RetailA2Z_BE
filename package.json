@@ -10,12 +10,13 @@
     "seed": "node server/services/seedService.js",
     "migrate:categories": "node scripts/migrateItemCategories.js",
     "migrate:brands": "node scripts/migrateItemBrands.js",
-    "test": "node tests/items.test.js && node tests/categories.test.js && node tests/brands.test.js && node tests/suppliers.test.js && node tests/purchases.test.js",
+    "test": "node tests/items.test.js && node tests/categories.test.js && node tests/brands.test.js && node tests/suppliers.test.js && node tests/purchases.test.js && node tests/customers.test.js",
     "test:items": "node tests/items.test.js",
     "test:categories": "node tests/categories.test.js",
     "test:brands": "node tests/brands.test.js",
     "test:suppliers": "node tests/suppliers.test.js",
-    "test:purchases": "node tests/purchases.test.js"
+    "test:purchases": "node tests/purchases.test.js",
+    "test:customers": "node tests/customers.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
