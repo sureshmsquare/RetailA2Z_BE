@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 /**
  * Bill Totals and Financial Calculations Utility
  * The ONLY place in billing with money formulas.
@@ -28,13 +30,14 @@ export function computeLineAmount(quantityBase, ratePaise) {
  *
  * @param {Array<object>} lines - Array of bill draft line objects
  * @param {object} [config] - Billing configuration (ROUND_OFF_MODE, etc.)
+ * @param {number} [optDiscountPaise] - Optional approved discount in paise
  * @returns {object} { subtotalPaise, discountPaise, roundOffPaise, totalPaise, itemCount, unitCount, taxBreakup }
  */
-export function computeTotals(lines = [], config = {}) {
+export function computeTotals(lines = [], config = {}, optDiscountPaise) {
   let subtotalPaise = 0;
   let itemCount = 0;
   let unitCountRaw = 0;
-  const taxGroupMap = new Map(); // ratePercent -> { taxablePaise, taxPaise }
+  const taxGroupMap = new Map(); // ratePercent -> { ratePercent, grossPaise }
 
   for (const line of lines) {
     if (line.status !== 'matched') continue;
@@ -50,25 +53,26 @@ export function computeTotals(lines = [], config = {}) {
       : (line.tax && line.tax.taxRatePercent !== undefined ? Number(line.tax.taxRatePercent) : null);
 
     if (taxRate !== null && !isNaN(taxRate) && taxRate > 0) {
-      // Prices are tax-inclusive: taxable = round(amount * 100 / (100 + rate)), tax = amount - taxable
-      const taxable = Math.round((amount * 100) / (100 + taxRate));
-      const tax = amount - taxable;
-
       if (!taxGroupMap.has(taxRate)) {
-        taxGroupMap.set(taxRate, { ratePercent: taxRate, taxablePaise: 0, taxPaise: 0 });
+        taxGroupMap.set(taxRate, { ratePercent: taxRate, grossPaise: 0 });
       }
       const group = taxGroupMap.get(taxRate);
-      group.taxablePaise += taxable;
-      group.taxPaise += tax;
+      group.grossPaise += amount;
     }
   }
 
-  const discountPaise = 0; // Placeholder for Approvals / Discounts module
+  const discountPaise = Math.min(
+    subtotalPaise,
+    Math.max(
+      0,
+      Number(optDiscountPaise !== undefined ? optDiscountPaise : (config && config.discountPaise)) || 0
+    )
+  );
   let afterDiscountPaise = Math.max(0, subtotalPaise - discountPaise);
   let roundOffPaise = 0;
   let totalPaise = afterDiscountPaise;
 
-  const roundOffMode = config.ROUND_OFF_MODE || 'none';
+  const roundOffMode = (config && config.ROUND_OFF_MODE) || 'none';
   if (roundOffMode === 'nearest_rupee') {
     // Round to the nearest 100 paise (nearest rupee) and keep the difference
     const roundedTarget = Math.round(afterDiscountPaise / 100) * 100;
@@ -81,7 +85,22 @@ export function computeTotals(lines = [], config = {}) {
 
   const unitCount = Math.round(unitCountRaw * 1000) / 1000;
 
-  const taxBreakup = Array.from(taxGroupMap.values()).sort((a, b) => a.ratePercent - b.ratePercent);
+  // Compute taxBreakup with discount distributed proportionally across tax groups
+  const taxBreakup = Array.from(taxGroupMap.values())
+    .map((group) => {
+      let effectiveGross = group.grossPaise;
+      if (subtotalPaise > 0 && discountPaise > 0) {
+        effectiveGross = Math.round((group.grossPaise * afterDiscountPaise) / subtotalPaise);
+      }
+      const taxablePaise = Math.round((effectiveGross * 100) / (100 + group.ratePercent));
+      const taxPaise = effectiveGross - taxablePaise;
+      return {
+        ratePercent: group.ratePercent,
+        taxablePaise,
+        taxPaise,
+      };
+    })
+    .sort((a, b) => a.ratePercent - b.ratePercent);
 
   return {
     subtotalPaise,
@@ -92,6 +111,95 @@ export function computeTotals(lines = [], config = {}) {
     unitCount,
     taxBreakup,
   };
+}
+
+/**
+ * Computes discount and allocates it proportionally across line items (BRD APR-01, BIL-06).
+ *
+ * @param {object} params
+ * @param {Array<object>} [params.lines] - Matched lines array (optional)
+ * @param {number} params.lineGrossPaise - Sum of line gross amounts in paise
+ * @param {number} [params.discountAmountPaise] - Direct discount in paise
+ * @param {number} [params.discountPercent] - Discount percentage (e.g. 5 or 10.5)
+ * @returns {{ discountPaise: number, allocation: Array<{ lineId: string|null, discountPaise: number }> }}
+ */
+export function computeDiscount({ lines = [], lineGrossPaise = 0, discountAmountPaise, discountPercent }) {
+  let gross = Number(lineGrossPaise) || 0;
+  if (!gross && Array.isArray(lines) && lines.length > 0) {
+    gross = lines
+      .filter((l) => l.status === 'matched')
+      .reduce((sum, l) => sum + (Number(l.amountPaise) || 0), 0);
+  }
+
+  let discountPaise = 0;
+  if (discountPercent !== undefined && discountPercent !== null) {
+    const pct = Math.max(0, Math.min(100, Number(discountPercent)));
+    discountPaise = Math.round((gross * pct) / 100);
+  } else if (discountAmountPaise !== undefined && discountAmountPaise !== null) {
+    discountPaise = Math.min(gross, Math.max(0, Math.round(Number(discountAmountPaise))));
+  }
+
+  // Allocate proportionally across lines
+  const eligibleLines = (lines || []).filter((l) => l.status === 'matched');
+  const allocation = [];
+
+  if (eligibleLines.length > 0 && gross > 0 && discountPaise > 0) {
+    let allocatedSum = 0;
+    for (let i = 0; i < eligibleLines.length; i++) {
+      const line = eligibleLines[i];
+      const lineGross = Number(line.amountPaise) || 0;
+      let lineDiscount = 0;
+
+      if (i === eligibleLines.length - 1) {
+        // Last line absorbs rounding correction so sum matches exactly
+        lineDiscount = Math.max(0, discountPaise - allocatedSum);
+      } else {
+        lineDiscount = Math.round((lineGross * discountPaise) / gross);
+        allocatedSum += lineDiscount;
+      }
+
+      allocation.push({
+        lineId: line.lineId ? line.lineId.toString() : (line._id ? line._id.toString() : null),
+        discountPaise: lineDiscount,
+      });
+    }
+  } else if (eligibleLines.length > 0) {
+    for (const line of eligibleLines) {
+      allocation.push({
+        lineId: line.lineId ? line.lineId.toString() : (line._id ? line._id.toString() : null),
+        discountPaise: 0,
+      });
+    }
+  }
+
+  return {
+    discountPaise,
+    allocation,
+  };
+}
+
+/**
+ * Builds a deterministic cryptographic signature of draft lines (BRD APR-03).
+ * Stable concat of sorted (lineId + qty + unitType + itemId + sellingPricePaise) hashed with sha256.
+ *
+ * @param {object} draft - Bill draft document or plain object
+ * @returns {string} SHA-256 hex string
+ */
+export function buildLineSignature(draft) {
+  const lines = (draft && draft.lines) || [];
+  const parts = lines
+    .filter((l) => l.status === 'matched')
+    .map((l) => {
+      const lineId = String(l.lineId || l._id || '');
+      const qty = String(l.quantity || 0);
+      const unitType = String(l.unitType || '');
+      const itemId = String(l.itemId?._id || l.itemId || '');
+      const sellingPricePaise = String(l.rateSnapshotPaise || l.sellingPricePaise || l.amountPaise || 0);
+      return `${lineId}:${qty}:${unitType}:${itemId}:${sellingPricePaise}`;
+    })
+    .sort();
+
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
 /**

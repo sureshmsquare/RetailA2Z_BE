@@ -171,10 +171,12 @@ export function serializeDraftForRole(draft, role, context = {}) {
   };
 
   // Calculate totals
-  const computedTotals = computeTotals(rawLines, config);
+  const approvedDiscount = raw.discountStatus === 'approved' ? Number(raw.discountPaise) || 0 : 0;
+  const computedTotals = computeTotals(rawLines, config, approvedDiscount);
 
   const totals = {
     total: toRupees(computedTotals.totalPaise),
+    discount: toRupees(computedTotals.discountPaise),
   };
 
   if (role === 'admin') {
@@ -272,6 +274,23 @@ export function serializeDraftForRole(draft, role, context = {}) {
     warnings: validation.warnings || [],
     requiredApprovals: validation.requiredApprovals || [],
     readyToSubmit: Boolean(validation.readyToSubmit),
+    discountStatus: raw.discountStatus || 'none',
+    discountPaise: raw.discountPaise || 0,
+    discountAmount: toRupees(raw.discountPaise || 0),
+    discountApprovedPaise: raw.discountApprovedPaise || null,
+    discountApprovedAmount: raw.discountApprovedPaise ? toRupees(raw.discountApprovedPaise) : null,
+    discountApprovedPercent: raw.discountApprovedPercent || null,
+    discountApprovedAt: raw.discountApprovedAt || null,
+    discountApprovedBy: raw.discountApprovedBy || null,
+    discountReason: raw.discountReason || '',
+    discountRequestId: raw.discountRequestId ? raw.discountRequestId.toString() : null,
+    discountApprovalSnapshot: raw.discountApprovalSnapshot || null,
+    creditOverrideStatus: raw.creditOverrideStatus || 'none',
+    creditOverrideRequestId: raw.creditOverrideRequestId ? raw.creditOverrideRequestId.toString() : null,
+    creditOverrideApprovedAt: raw.creditOverrideApprovedAt || null,
+    creditOverrideApprovedBy: raw.creditOverrideApprovedBy || null,
+    creditOverrideApprovalSnapshot: raw.creditOverrideApprovalSnapshot || null,
+    creditOverrideReason: raw.creditOverrideReason || '',
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
