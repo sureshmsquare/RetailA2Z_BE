@@ -7,6 +7,7 @@ export const postDraft = async (req, res, next) => {
     const actor = req.user;
     const userRole = req.user?.role || 'admin';
     const paymentDetails = req.body || {};
+    const expectedVersion = req.body.expectedVersion;
 
     const result = await salesService.postDraftBill({
       storeId,
@@ -14,6 +15,7 @@ export const postDraft = async (req, res, next) => {
       actor,
       userRole,
       paymentDetails,
+      expectedVersion,
     });
 
     return res.status(201).json({

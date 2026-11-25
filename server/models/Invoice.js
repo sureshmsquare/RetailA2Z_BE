@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { toRupees } from '../utils/money.js';
+import { daysBetweenInStoreTz } from '../utils/storeDate.js';
 
 const invoiceLineSchema = new mongoose.Schema(
   {
@@ -327,22 +328,28 @@ invoiceSchema.index({ storeId: 1, draftId: 1 }, { unique: true });
 invoiceSchema.index({ storeId: 1, 'customer.customerId': 1, settlementStatus: 1 });
 invoiceSchema.index({ storeId: 1, postingDate: -1 });
 
-export function formatInvoiceForResponse(doc, userRole = 'admin') {
+export function formatInvoiceForResponse(doc, userRole = 'admin', storeTimezone = 'Asia/Kolkata') {
   if (!doc) return null;
   const raw = doc.toObject ? doc.toObject() : { ...doc };
 
   const id = raw._id ? String(raw._id) : raw.id;
   const isAdmin = userRole === 'admin';
+  const tz = raw.storeId?.timezone || (typeof storeTimezone === 'string' ? storeTimezone : 'Asia/Kolkata');
 
   // Calculate overdue status
   const now = new Date();
   let isOverdue = false;
   let overdueDays = 0;
-  if (raw.dueDate && (raw.settlementStatus === 'unpaid' || raw.settlementStatus === 'part_paid')) {
-    const dueTime = new Date(raw.dueDate).getTime();
-    if (now.getTime() > dueTime) {
+  const balancePaise = Number(raw.payment?.balancePaise) ?? 0;
+  const isUnsettled = (raw.settlementStatus === 'unpaid' || raw.settlementStatus === 'part_paid') || balancePaise > 0;
+
+  if (raw.dueDate && isUnsettled && raw.settlementStatus !== 'settled') {
+    const diff = daysBetweenInStoreTz(raw.dueDate, now, tz);
+    if (diff > 0) {
       isOverdue = true;
-      overdueDays = Math.max(1, Math.floor((now.getTime() - dueTime) / (1000 * 60 * 60 * 24)));
+      overdueDays = diff;
+    } else {
+      overdueDays = 0;
     }
   }
 

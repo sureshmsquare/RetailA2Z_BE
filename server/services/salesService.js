@@ -13,7 +13,8 @@ import auditService from './auditService.js';
 import { scopeToStore } from '../middleware/auth.js';
 import { AppError } from '../utils/AppError.js';
 import { toPaise, toRupees } from '../utils/money.js';
-import { computeTotals } from '../utils/billTotals.js';
+import { computeTotals, buildLineSignature } from '../utils/billTotals.js';
+import { addDaysInStoreTz } from '../utils/storeDate.js';
 
 /**
  * Generates an auto-incremented, collision-free invoiceNumber (e.g. INV-000001) for the store.
@@ -109,14 +110,23 @@ export async function generateUniqueReceiptNumber(storeId, session = null) {
  * creates counter Receipts, and links the records.
  * Implements repeat-safe idempotency (UAT-08, UAT-10).
  */
-export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin', paymentDetails = {} }) {
+export async function postDraftBill({
+  storeId,
+  draftId,
+  actor,
+  userRole = 'admin',
+  paymentDetails = {},
+  expectedVersion,
+}) {
   const storeObjectId = new mongoose.Types.ObjectId(String(storeId));
   const draftObjectId = new mongoose.Types.ObjectId(String(draftId));
 
-  // 1. Fetch draft scoped to store
-  const draft = await BillDraft.findOne(
-    scopeToStore({ _id: draftObjectId }, storeObjectId)
-  );
+  // 1. Fetch draft scoped to store and store timezone
+  const [draft, store] = await Promise.all([
+    BillDraft.findOne(scopeToStore({ _id: draftObjectId }, storeObjectId)),
+    Store.findById(storeObjectId).select('timezone').lean(),
+  ]);
+  const storeTimezone = store?.timezone || 'Asia/Kolkata';
 
   if (!draft) {
     throw new AppError('Bill draft not found', 404);
@@ -129,7 +139,7 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
     );
     if (existingInvoice) {
       return {
-        invoice: formatInvoiceForResponse(existingInvoice, userRole),
+        invoice: formatInvoiceForResponse(existingInvoice, userRole, storeTimezone),
         isDuplicate: true,
         message: 'Draft has already been posted.',
       };
@@ -140,11 +150,49 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
     throw new AppError('Discarded draft cannot be posted.', 400);
   }
 
+  // Version check & Discount approval snapshot validation (BRD APR-03, UAT-04)
+  const expVer = expectedVersion !== undefined ? expectedVersion : paymentDetails.expectedVersion;
+  if (expVer !== undefined && draft.version !== Number(expVer)) {
+    throw new AppError('DRAFT_VERSION_MISMATCH', 409, {
+      code: 'DRAFT_VERSION_MISMATCH',
+      currentVersion: draft.version,
+    });
+  }
+
+  if (
+    draft.discountStatus === 'approved' &&
+    (!draft.discountApprovalSnapshot || draft.discountApprovalSnapshot.version !== draft.version)
+  ) {
+    throw new AppError('APPROVAL_INVALIDATED', 409, {
+      code: 'APPROVAL_INVALIDATED',
+      currentVersion: draft.version,
+    });
+  }
+
+  if (
+    draft.creditOverrideStatus === 'approved' &&
+    (!draft.creditOverrideApprovalSnapshot ||
+      draft.creditOverrideApprovalSnapshot.version !== draft.version ||
+      draft.creditOverrideApprovalSnapshot.lineSignature !== buildLineSignature(draft))
+  ) {
+    throw new AppError('CREDIT_OVERRIDE_INVALIDATED', 409, {
+      code: 'CREDIT_OVERRIDE_INVALIDATED',
+      currentVersion: draft.version,
+    });
+  }
+
   // 3. Enrich & validate draft state
   const valContext = await billingService.buildValidationContext(storeObjectId, draft);
   const validation = valContext.validation || {};
 
   if (!validation.readyToSubmit) {
+    const hardBlocker = (validation.blockers || []).find((b) => b.ruleTriggered === 'hard_block');
+    if (hardBlocker) {
+      throw new AppError('CREDIT_HARD_BLOCK', 422, {
+        code: 'CREDIT_HARD_BLOCK',
+        message: hardBlocker.message,
+      });
+    }
     const firstBlocker = validation.blockers && validation.blockers[0];
     const msg = firstBlocker ? firstBlocker.message : 'Draft is not ready to submit.';
     throw new AppError(`Cannot post bill: ${msg}`, 400);
@@ -181,6 +229,7 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
   // 5. Customer & Credit checks
   let customerDoc = null;
   let dueDate = null;
+  const postingDate = new Date();
   const isCreditBill = draft.billType === 'credit';
 
   if (draft.customerId) {
@@ -195,8 +244,8 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
       throw new AppError(`Customer "${customerDoc.name}" is not eligible for credit billing.`, 400);
     }
 
-    const creditDays = customerDoc.creditDays || 15;
-    dueDate = new Date(Date.now() + creditDays * 24 * 60 * 60 * 1000);
+    const creditDays = customerDoc.creditDays ?? 15;
+    dueDate = addDaysInStoreTz(postingDate, creditDays, storeTimezone);
   } else if (isCreditBill) {
     throw new AppError('Credit bill requires an identified customer.', 400);
   }
@@ -247,16 +296,75 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
     }
   }
 
-  // 7. Atomic Execution
-  let session = null;
-  try {
-    session = await mongoose.startSession();
-    session.startTransaction();
-  } catch {
-    session = null; // Fallback if standalone MongoDB without replica set
-  }
+  // 7. Atomic Execution (BRD Section 11)
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
+    // Re-fetch draft inside transaction to verify version and lock against concurrent posts (BRD APR-03, UAT-04)
+    const txDraft = await BillDraft.findOne(
+      scopeToStore({ _id: draftObjectId }, storeObjectId)
+    ).session(session || null);
+
+    if (!txDraft) {
+      throw new AppError('Bill draft not found', 404);
+    }
+
+    if (txDraft.status === 'posted' || txDraft.invoiceId) {
+      const existingInvoice = await Invoice.findOne(
+        scopeToStore({ _id: txDraft.invoiceId }, storeObjectId)
+      ).session(session || null);
+      if (existingInvoice) {
+        return {
+          invoice: formatInvoiceForResponse(existingInvoice, userRole, storeTimezone),
+          isDuplicate: true,
+          message: 'Draft has already been posted.',
+        };
+      }
+    }
+
+    if (expVer !== undefined && txDraft.version !== Number(expVer)) {
+      throw new AppError('DRAFT_VERSION_MISMATCH', 409, {
+        code: 'DRAFT_VERSION_MISMATCH',
+        currentVersion: txDraft.version,
+      });
+    }
+
+    if (
+      txDraft.discountStatus === 'approved' &&
+      (!txDraft.discountApprovalSnapshot || txDraft.discountApprovalSnapshot.version !== txDraft.version)
+    ) {
+      throw new AppError('APPROVAL_INVALIDATED', 409, {
+        code: 'APPROVAL_INVALIDATED',
+        currentVersion: txDraft.version,
+      });
+    }
+
+    if (
+      txDraft.creditOverrideStatus === 'approved' &&
+      (!txDraft.creditOverrideApprovalSnapshot ||
+        txDraft.creditOverrideApprovalSnapshot.version !== txDraft.version ||
+        txDraft.creditOverrideApprovalSnapshot.lineSignature !== buildLineSignature(txDraft))
+    ) {
+      throw new AppError('CREDIT_OVERRIDE_INVALIDATED', 409, {
+        code: 'CREDIT_OVERRIDE_INVALIDATED',
+        currentVersion: txDraft.version,
+      });
+    }
+
+    if (isCreditBill && draft.customerId) {
+      const liveCustomer = await Customer.findOne(
+        scopeToStore({ _id: draft.customerId }, storeObjectId)
+      ).session(session);
+
+      if (!liveCustomer || !liveCustomer.isActive || !liveCustomer.creditEnabled || liveCustomer.creditRestricted) {
+        throw new AppError('CREDIT_HARD_BLOCK', 422, {
+          code: 'CREDIT_HARD_BLOCK',
+          message: 'Customer account is deactivated, credit-restricted, or not approved for credit.',
+        });
+      }
+    }
+
     const invoiceNumber = await generateUniqueInvoiceNumber(storeObjectId, session);
 
     // Build line item snapshots
@@ -347,7 +455,7 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
       invoiceNumber,
       draftId: draft._id,
       draftNumber: draft.draftNumber,
-      postingDate: new Date(),
+      postingDate,
       billType: draft.billType,
       settlementStatus,
       customer: customerSnapshot,
@@ -440,7 +548,7 @@ export async function postDraftBill({ storeId, draftId, actor, userRole = 'admin
     }
 
     return {
-      invoice: formatInvoiceForResponse(invoice, userRole),
+      invoice: formatInvoiceForResponse(invoice, userRole, storeTimezone),
       receipt: receiptDoc ? formatReceiptForResponse(receiptDoc) : null,
       isDuplicate: false,
     };
@@ -463,15 +571,17 @@ export async function getInvoiceById({ storeId, invoiceId, actor, userRole = 'ad
   const storeObjectId = new mongoose.Types.ObjectId(String(storeId));
   const invoiceObjectId = new mongoose.Types.ObjectId(String(invoiceId));
 
-  const invoice = await Invoice.findOne(
-    scopeToStore({ _id: invoiceObjectId }, storeObjectId)
-  );
+  const [invoice, store] = await Promise.all([
+    Invoice.findOne(scopeToStore({ _id: invoiceObjectId }, storeObjectId)),
+    Store.findById(storeObjectId).select('timezone').lean(),
+  ]);
 
   if (!invoice) {
     throw new AppError('Invoice not found', 404);
   }
 
-  return formatInvoiceForResponse(invoice, userRole);
+  const storeTimezone = store?.timezone || 'Asia/Kolkata';
+  return formatInvoiceForResponse(invoice, userRole, storeTimezone);
 }
 
 /**
@@ -509,17 +619,20 @@ export async function listInvoices({ storeId, actor, userRole = 'admin', query =
     ];
   }
 
-  const [invoices, total] = await Promise.all([
+  const [invoices, total, store] = await Promise.all([
     Invoice.find(filter)
       .sort({ postingDate: -1, createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     Invoice.countDocuments(filter),
+    Store.findById(storeObjectId).select('timezone').lean(),
   ]);
 
+  const storeTimezone = store?.timezone || 'Asia/Kolkata';
+
   return {
-    data: invoices.map((inv) => formatInvoiceForResponse(inv, userRole)),
+    data: invoices.map((inv) => formatInvoiceForResponse(inv, userRole, storeTimezone)),
     pagination: {
       page,
       limit,
@@ -545,7 +658,8 @@ export async function getInvoicePrintData({ storeId, invoiceId, actor, userRole 
     throw new AppError('Invoice not found', 404);
   }
 
-  const invoiceData = formatInvoiceForResponse(invoice, 'admin'); // Print includes item amounts
+  const storeTimezone = store?.timezone || 'Asia/Kolkata';
+  const invoiceData = formatInvoiceForResponse(invoice, 'admin', storeTimezone); // Print includes item amounts
 
   const addr = store?.address;
   const formattedAddress = addr

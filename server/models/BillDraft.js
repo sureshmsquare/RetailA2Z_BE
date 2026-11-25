@@ -212,6 +212,80 @@ const billDraftSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    discountRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'DiscountRequest',
+      default: null,
+    },
+    discountApprovedPaise: {
+      type: Number,
+      default: null,
+    },
+    discountApprovedPercent: {
+      type: Number,
+      default: null,
+    },
+    discountApprovedAt: {
+      type: Date,
+      default: null,
+    },
+    discountApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    discountApprovalSnapshot: {
+      type: new mongoose.Schema(
+        {
+          version: { type: Number, default: null },
+          billTotalPaise: { type: Number, default: null },
+          lineSignature: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
+    discountReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    creditOverrideStatus: {
+      type: String,
+      enum: ['none', 'pending', 'approved', 'rejected'],
+      default: 'none',
+      index: true,
+    },
+    creditOverrideRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'CreditOverrideRequest',
+      default: null,
+    },
+    creditOverrideApprovedAt: {
+      type: Date,
+      default: null,
+    },
+    creditOverrideApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    creditOverrideApprovalSnapshot: {
+      type: new mongoose.Schema(
+        {
+          version: { type: Number, default: null },
+          lineSignature: { type: String, default: null },
+          exposurePaise: { type: Number, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
+    creditOverrideReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     pricedAt: {
       type: Date,
       default: null,

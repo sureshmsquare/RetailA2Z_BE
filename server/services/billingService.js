@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import BillDraft from '../models/BillDraft.js';
+import DiscountRequest from '../models/DiscountRequest.js';
+import CreditOverrideRequest from '../models/CreditOverrideRequest.js';
 import Item from '../models/Item.js';
 import Customer from '../models/Customer.js';
 import Counter from '../models/Counter.js';
@@ -65,14 +67,134 @@ export async function generateUniqueDraftNumber(storeId, session = null) {
 }
 
 /**
- * Invalidate approvals hook.
- * Resets approval placeholders and increments draft version.
- * TODO: Approvals module will expand this to invalidate pending/approved discounts.
+ * Invalidate approvals hook (BRD APR-03).
+ * Auto-invalidates pending or approved discounts upon any draft mutation.
  */
-export function invalidateApprovals(draft) {
+export async function invalidateApprovals(draft, actor = null, session = null) {
   draft.version = (draft.version || 1) + 1;
-  draft.discountStatus = 'none';
-  draft.discountPaise = 0;
+
+  if (draft.discountStatus === 'approved') {
+    draft.discountStatus = 'none';
+    draft.discountPaise = 0;
+    draft.discountApprovedPaise = null;
+    draft.discountApprovedPercent = null;
+    draft.discountApprovedAt = null;
+    draft.discountApprovedBy = null;
+    draft.discountApprovalSnapshot = null;
+    const oldRequestId = draft.discountRequestId;
+    draft.discountRequestId = null;
+
+    if (oldRequestId) {
+      await DiscountRequest.updateOne(
+        { _id: oldRequestId },
+        { status: 'expired' },
+        { session: session || undefined }
+      );
+    }
+    await DiscountRequest.updateMany(
+      { draftId: draft._id, status: { $in: ['pending', 'approved'] } },
+      { status: 'expired' },
+      { session: session || undefined }
+    );
+
+    await auditService.log({
+      actor: actor || 'SYSTEM',
+      storeId: draft.storeId,
+      action: 'DISCOUNT_AUTO_INVALIDATED',
+      entity: 'BillDraft',
+      entityId: draft._id,
+      reason: 'draft changed',
+    });
+  } else if (draft.discountStatus === 'pending') {
+    const oldRequestId = draft.discountRequestId;
+    draft.discountStatus = 'none';
+    draft.discountPaise = 0;
+    draft.discountRequestId = null;
+
+    if (oldRequestId) {
+      await DiscountRequest.updateOne(
+        { _id: oldRequestId },
+        { status: 'expired' },
+        { session: session || undefined }
+      );
+    }
+    await DiscountRequest.updateMany(
+      { draftId: draft._id, status: 'pending' },
+      { status: 'expired' },
+      { session: session || undefined }
+    );
+
+    await auditService.log({
+      actor: actor || 'SYSTEM',
+      storeId: draft.storeId,
+      action: 'DISCOUNT_AUTO_CANCELLED',
+      entity: 'BillDraft',
+      entityId: draft._id,
+      reason: 'draft changed',
+    });
+  } else {
+    draft.discountStatus = 'none';
+    draft.discountPaise = 0;
+  }
+
+  // Credit Override Auto-Invalidation (BRD APR-04, Task 5C)
+  if (draft.creditOverrideStatus === 'approved') {
+    draft.creditOverrideStatus = 'none';
+    draft.creditOverrideApprovedAt = null;
+    draft.creditOverrideApprovedBy = null;
+    draft.creditOverrideApprovalSnapshot = null;
+    draft.creditOverrideReason = '';
+    const oldOverrideId = draft.creditOverrideRequestId;
+    draft.creditOverrideRequestId = null;
+
+    if (oldOverrideId) {
+      await CreditOverrideRequest.updateOne(
+        { _id: oldOverrideId },
+        { status: 'expired' },
+        { session: session || undefined }
+      );
+    }
+    await CreditOverrideRequest.updateMany(
+      { draftId: draft._id, status: { $in: ['pending', 'approved'] } },
+      { status: 'expired' },
+      { session: session || undefined }
+    );
+
+    await auditService.log({
+      actor: actor || 'SYSTEM',
+      storeId: draft.storeId,
+      action: 'CREDIT_OVERRIDE_AUTO_INVALIDATED',
+      entity: 'BillDraft',
+      entityId: draft._id,
+      reason: 'draft changed',
+    });
+  } else if (draft.creditOverrideStatus === 'pending') {
+    const oldOverrideId = draft.creditOverrideRequestId;
+    draft.creditOverrideStatus = 'none';
+    draft.creditOverrideRequestId = null;
+
+    if (oldOverrideId) {
+      await CreditOverrideRequest.updateOne(
+        { _id: oldOverrideId },
+        { status: 'expired' },
+        { session: session || undefined }
+      );
+    }
+    await CreditOverrideRequest.updateMany(
+      { draftId: draft._id, status: 'pending' },
+      { status: 'expired' },
+      { session: session || undefined }
+    );
+
+    await auditService.log({
+      actor: actor || 'SYSTEM',
+      storeId: draft.storeId,
+      action: 'CREDIT_OVERRIDE_AUTO_CANCELLED',
+      entity: 'BillDraft',
+      entityId: draft._id,
+      reason: 'draft changed while pending',
+    });
+  }
 }
 
 /**
@@ -280,7 +402,7 @@ export const billingService = {
       };
     }
 
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
     draft.updatedBy = {
       id: actor._id.toString(),
       name: actor.name || 'Unknown',
@@ -588,7 +710,7 @@ export const billingService = {
       }
     }
 
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
     draft.pricedAt = new Date();
 
     const totals = computeTotals(draft.lines, billingConfig);
@@ -720,7 +842,7 @@ export const billingService = {
       });
     }
 
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
     draft.pricedAt = new Date();
 
     const totals = computeTotals(draft.lines, billingConfig);
@@ -894,7 +1016,7 @@ export const billingService = {
       }
     }
 
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
     draft.pricedAt = new Date();
 
     const totals = computeTotals(draft.lines, billingConfig);
@@ -950,7 +1072,7 @@ export const billingService = {
 
     draft.lines.splice(lineIndex, 1);
 
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
     const totals = computeTotals(draft.lines, billingConfig);
     draft.totalPaise = totals.totalPaise;
 
@@ -1081,7 +1203,7 @@ export const billingService = {
     }
 
     draft.pricedAt = new Date();
-    invalidateApprovals(draft);
+    await invalidateApprovals(draft, actor, session);
 
     const totals = computeTotals(draft.lines, billingConfig);
     draft.totalPaise = totals.totalPaise;
@@ -1180,6 +1302,22 @@ export const billingService = {
       ];
     }
 
+    // Exclude completely blank drafts (0 lines, no customerId, no walkIn name/mobile, no approvals)
+    if (!query.includeEmpty) {
+      filter.$nor = [
+        {
+          $and: [
+            { $or: [{ lines: { $size: 0 } }, { lines: { $exists: false } }] },
+            { customerId: null },
+            { $or: [{ 'walkIn.name': null }, { 'walkIn.name': '' }, { 'walkIn.name': { $exists: false } }] },
+            { $or: [{ 'walkIn.mobile': null }, { 'walkIn.mobile': '' }, { 'walkIn.mobile': { $exists: false } }] },
+            { $or: [{ discountStatus: 'none' }, { discountStatus: null }, { discountStatus: { $exists: false } }] },
+            { $or: [{ creditOverrideStatus: 'none' }, { creditOverrideStatus: null }, { creditOverrideStatus: { $exists: false } }] },
+          ],
+        },
+      ];
+    }
+
     // Pagination (local fallback)
     // TODO: Switch to shared pagination helper when available
     const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -1204,23 +1342,46 @@ export const billingService = {
           id: d.customerId._id ? d.customerId._id.toString() : d.customerId.toString(),
           name: d.customerId.name || 'Unknown',
         };
-      } else if (d.walkIn && d.walkIn.name) {
+      } else if (d.walkIn && (d.walkIn.name || d.walkIn.mobile)) {
         customerObj = {
           id: null,
-          name: `${d.walkIn.name} (Walk-in)`,
+          name: d.walkIn.name ? `${d.walkIn.name} (Walk-in)` : 'Walk-in',
         };
       }
+
+      const lines = d.lines || [];
+      const lineCount = lines.length;
+      let totalPaise = typeof d.totalPaise === 'number' ? d.totalPaise : 0;
+      if (totalPaise === 0 && lineCount > 0) {
+        const calculated = computeTotals(lines, billingConfig);
+        totalPaise = calculated.totalPaise;
+      }
+      const totalRupees = toRupees(totalPaise);
 
       return {
         id: d._id.toString(),
         draftNumber: d.draftNumber,
         billType: d.billType,
         customer: customerObj,
-        lineCount: (d.lines || []).length,
-        total: toRupees(d.totalPaise || 0),
+        lines,
+        lineCount,
+        itemsCount: lineCount,
+        totalPaise,
+        total: totalRupees,
+        totals: {
+          total: totalRupees,
+          totalPaise,
+        },
+        summary: {
+          lineCount,
+          itemsCount: lineCount,
+        },
         status: d.status,
         ...(userRole === 'admin'
-          ? { ownerName: d.ownerId?.name || (d.createdBy?.name || 'Unknown') }
+          ? {
+              ownerName: d.ownerId?.name || (d.createdBy?.name || 'Unknown'),
+              createdByName: d.ownerId?.name || (d.createdBy?.name || 'Unknown'),
+            }
           : {}),
         updatedAt: d.updatedAt,
       };

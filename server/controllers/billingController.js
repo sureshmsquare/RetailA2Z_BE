@@ -1,5 +1,8 @@
 import billingService from '../services/billingService.js';
 import salesService from '../services/salesService.js';
+import discountService from '../services/discountService.js';
+import creditOverrideService from '../services/creditOverrideService.js';
+import { toPaise } from '../utils/money.js';
 
 /**
  * Billing Controller - Thin wrapper over billingService.
@@ -260,6 +263,90 @@ export const billingController = {
   },
 
   /**
+   * POST /api/billing/drafts/:id/discount/request
+   */
+  async requestDiscount(req, res, next) {
+    try {
+      let requestedAmountPaise = req.body.requestedAmountPaise;
+      if (requestedAmountPaise === undefined && req.body.requestedAmount !== undefined) {
+        requestedAmountPaise = toPaise(req.body.requestedAmount);
+      }
+
+      const result = await discountService.requestDiscount({
+        storeId: req.storeId,
+        draftId: req.params.id,
+        actor: req.user,
+        userRole: req.user.role,
+        reason: req.body.reason,
+        requestedAmountPaise,
+        requestedPercent: req.body.requestedPercent,
+        expectedVersion: req.body.expectedVersion,
+      });
+
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
+   * POST /api/billing/drafts/:id/discount/cancel
+   */
+  async cancelDiscount(req, res, next) {
+    try {
+      const result = await discountService.cancelDiscount({
+        storeId: req.storeId,
+        draftId: req.params.id,
+        actor: req.user,
+        userRole: req.user.role,
+      });
+
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
+   * POST /api/billing/drafts/:id/credit-override/request
+   */
+  async requestCreditOverride(req, res, next) {
+    try {
+      const result = await creditOverrideService.requestCreditOverride({
+        storeId: req.storeId,
+        draftId: req.params.id,
+        actor: req.user,
+        userRole: req.user.role,
+        reason: req.body.reason,
+        expectedVersion: req.body.expectedVersion,
+      });
+
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
+   * POST /api/billing/drafts/:id/credit-override/cancel
+   */
+  async cancelCreditOverride(req, res, next) {
+    try {
+      const result = await creditOverrideService.cancelCreditOverride({
+        storeId: req.storeId,
+        draftId: req.params.id,
+        actor: req.user,
+        userRole: req.user.role,
+        expectedVersion: req.body?.expectedVersion,
+      });
+
+      return res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /**
    * POST /api/billing/drafts/:id/post
    */
   async postDraft(req, res, next) {
@@ -270,6 +357,7 @@ export const billingController = {
         actor: req.user,
         userRole: req.user.role,
         paymentDetails: req.body,
+        expectedVersion: req.body.expectedVersion,
       });
       return res.status(201).json({
         success: true,
