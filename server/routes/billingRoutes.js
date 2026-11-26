@@ -12,6 +12,8 @@ import {
   validateDraftId,
   validateItemSearch,
   validateCustomerId,
+  validateRequestDiscount,
+  validateRequestCreditOverride,
 } from '../validators/billingValidators.js';
 import { validatePostDraft } from '../validators/salesValidators.js';
 
@@ -44,6 +46,14 @@ router.delete('/drafts/:id/lines/:lineId', validateDeleteLine, validate, billing
 
 // Refresh prices endpoint
 router.post('/drafts/:id/refresh-prices', validateDraftId, validate, billingController.refreshPrices);
+
+// Discount request & cancel endpoints (BRD APR-01)
+router.post('/drafts/:id/discount/request', validateRequestDiscount, validate, billingController.requestDiscount);
+router.post('/drafts/:id/discount/cancel', validateDraftId, validate, billingController.cancelDiscount);
+
+// Credit override request & cancel endpoints (BRD APR-04, CR-04)
+router.post('/drafts/:id/credit-override/request', validateRequestCreditOverride, validate, billingController.requestCreditOverride);
+router.post('/drafts/:id/credit-override/cancel', validateDraftId, validate, billingController.cancelCreditOverride);
 
 // Post / Settle draft bill endpoint (BRD Section 06)
 router.post('/drafts/:id/post', validatePostDraft, validate, billingController.postDraft);

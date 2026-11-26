@@ -13,6 +13,7 @@ export function errorHandler(err, req, res, next) {
       message: err.message,
     };
     if (err.code) payload.code = err.code;
+    if (err.currentVersion !== undefined) payload.currentVersion = err.currentVersion;
     if (err.otherSupplierName) payload.otherSupplierName = err.otherSupplierName;
     if (err.details) payload.details = err.details;
     if (err.warning) payload.warning = err.warning;

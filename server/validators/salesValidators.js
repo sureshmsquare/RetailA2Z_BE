@@ -10,6 +10,12 @@ export const validatePostDraft = [
     .custom(isValidObjectId)
     .withMessage('Invalid Draft ID format'),
 
+  body('expectedVersion')
+    .notEmpty()
+    .withMessage('expectedVersion is required')
+    .isInt({ min: 1 })
+    .withMessage('expectedVersion must be a positive integer'),
+
   body('mode')
     .optional()
     .trim()

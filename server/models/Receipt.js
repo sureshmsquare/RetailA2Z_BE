@@ -1,6 +1,27 @@
 import mongoose from 'mongoose';
 import { toRupees } from '../utils/money.js';
 
+const receiptAllocationSchema = new mongoose.Schema(
+  {
+    invoiceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Invoice',
+      required: true,
+    },
+    invoiceNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    allocatedAmountPaise: {
+      type: Number,
+      required: true,
+      min: [1, 'Allocated amount must be positive'],
+    },
+  },
+  { _id: false }
+);
+
 const receiptSchema = new mongoose.Schema(
   {
     storeId: {
@@ -17,13 +38,17 @@ const receiptSchema = new mongoose.Schema(
     invoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Invoice',
-      required: [true, 'Invoice reference is required'],
+      default: null,
       index: true,
     },
     invoiceNumber: {
       type: String,
-      required: true,
       trim: true,
+      default: '',
+    },
+    allocations: {
+      type: [receiptAllocationSchema],
+      default: [],
     },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -87,13 +112,20 @@ export function formatReceiptForResponse(doc) {
     _id: id,
     receiptNumber: raw.receiptNumber,
     invoiceId: raw.invoiceId ? String(raw.invoiceId) : null,
-    invoiceNumber: raw.invoiceNumber,
+    invoiceNumber: raw.invoiceNumber || '',
     customerId: raw.customerId ? String(raw.customerId) : null,
     receiptDate: raw.receiptDate,
+    amountPaise: Number(raw.amountPaise) || 0,
     amount: toRupees(raw.amountPaise),
     mode: raw.mode,
     reference: raw.reference || '',
     notes: raw.notes || '',
+    allocations: (raw.allocations || []).map((a) => ({
+      invoiceId: a.invoiceId ? String(a.invoiceId) : null,
+      invoiceNumber: a.invoiceNumber,
+      allocatedAmountPaise: Number(a.allocatedAmountPaise) || 0,
+      allocatedAmount: toRupees(a.allocatedAmountPaise),
+    })),
     status: raw.status,
     collectedBy: raw.collectedBy,
     createdAt: raw.createdAt,

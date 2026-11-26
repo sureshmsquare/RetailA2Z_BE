@@ -188,6 +188,52 @@ export const validateCustomerId = [
     .withMessage('Invalid customerId format'),
 ];
 
+export const validateRequestDiscount = [
+  param('id')
+    .custom(isValidObjectId)
+    .withMessage('Invalid draft ID format'),
+  body('reason')
+    .notEmpty()
+    .withMessage('Reason is required')
+    .isString()
+    .trim()
+    .isLength({ min: 3, max: 500 })
+    .withMessage('Reason must be between 3 and 500 characters'),
+  body('requestedAmountPaise')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('requestedAmountPaise must be a positive integer'),
+  body('requestedAmount')
+    .optional()
+    .isNumeric()
+    .withMessage('requestedAmount must be a number'),
+  body('requestedPercent')
+    .optional()
+    .isFloat({ min: 0.01, max: 100 })
+    .withMessage('requestedPercent must be between 0.01 and 100'),
+  body('expectedVersion')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('expectedVersion must be an integer of at least 1'),
+];
+
+export const validateRequestCreditOverride = [
+  param('id')
+    .custom(isValidObjectId)
+    .withMessage('Invalid draft ID format'),
+  body('reason')
+    .notEmpty()
+    .withMessage('Reason is required')
+    .isString()
+    .trim()
+    .isLength({ min: 3, max: 500 })
+    .withMessage('Reason must be between 3 and 500 characters'),
+  body('expectedVersion')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('expectedVersion must be an integer of at least 1'),
+];
+
 export default {
   validateCreateDraft,
   validateUpdateDraft,
@@ -198,5 +244,7 @@ export default {
   validateDraftId,
   validateItemSearch,
   validateCustomerId,
+  validateRequestDiscount,
+  validateRequestCreditOverride,
 };
 

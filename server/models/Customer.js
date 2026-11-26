@@ -113,6 +113,10 @@ const customerSchema = new mongoose.Schema(
       default: null,
       min: [1, 'Credit days must be an integer of at least 1'],
     },
+    creditRestricted: {
+      type: Boolean,
+      default: false,
+    },
     isActive: {
       type: Boolean,
       default: true,

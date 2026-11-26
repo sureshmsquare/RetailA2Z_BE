@@ -1,5 +1,5 @@
 import { toRupees } from '../utils/money.js';
-import { computeCreditImpact } from '../utils/billTotals.js';
+import { computeCreditImpact, buildLineSignature } from '../utils/billTotals.js';
 import billingConfig from '../config/billingConfig.js';
 
 /**
@@ -151,16 +151,26 @@ export function evaluateDraft(draft, context = {}) {
   // 6. Customer & Credit validation
   const isCreditBill = draft.billType === 'credit';
 
+  // Check if an approved credit override is valid for the current draft state (BRD APR-04, Task 5C)
+  const isCreditOverrideApproved =
+    draft.creditOverrideStatus === 'approved' &&
+    draft.creditOverrideApprovalSnapshot &&
+    draft.creditOverrideApprovalSnapshot.version === draft.version &&
+    (!draft.creditOverrideApprovalSnapshot.lineSignature ||
+      draft.creditOverrideApprovalSnapshot.lineSignature === buildLineSignature(draft));
+
   if (isCreditBill) {
     if (!draft.customerId) {
       blockers.push({
         code: 'CREDIT_CUSTOMER_REQUIRED',
+        ruleTriggered: 'hard_block',
         message: 'A customer account is required for credit bills.',
       });
     } else if (creditProfile) {
       if (!creditProfile.isActive) {
         blockers.push({
           code: 'CUSTOMER_INACTIVE',
+          ruleTriggered: 'hard_block',
           message: 'Selected customer account is inactive.',
         });
       }
@@ -168,6 +178,7 @@ export function evaluateDraft(draft, context = {}) {
       if (!creditProfile.creditAllowed) {
         blockers.push({
           code: 'CREDIT_NOT_ALLOWED',
+          ruleTriggered: 'hard_block',
           message: 'Selected customer is not approved for credit purchases.',
         });
       }
@@ -175,6 +186,7 @@ export function evaluateDraft(draft, context = {}) {
       if (creditProfile.creditRestricted) {
         blockers.push({
           code: 'CREDIT_RESTRICTED',
+          ruleTriggered: 'hard_block',
           message: 'Customer account has credit restrictions.',
         });
       }
@@ -182,9 +194,17 @@ export function evaluateDraft(draft, context = {}) {
       // Overdue policy evaluation
       if (creditProfile.overduePaise > 0) {
         const overduePolicy = config.OVERDUE_POLICY || 'warn'; // 'warn' | 'approval' | 'block'
-        if (overduePolicy === 'block') {
+        if (isCreditOverrideApproved) {
+          warnings.push({
+            code: 'OVERDUE_OVERRIDE_APPROVED',
+            overdue: toRupees(creditProfile.overduePaise),
+            days: creditProfile.oldestOverdueDays,
+            message: `Customer has overdue balance of Rs ${toRupees(creditProfile.overduePaise)} (credit override approved).`,
+          });
+        } else if (overduePolicy === 'block') {
           blockers.push({
             code: 'OVERDUE_BLOCKED',
+            ruleTriggered: 'overdue_present',
             overdue: toRupees(creditProfile.overduePaise),
             days: creditProfile.oldestOverdueDays,
             message: `Customer has overdue balance of Rs ${toRupees(creditProfile.overduePaise)} (${creditProfile.oldestOverdueDays} days). Credit billing is blocked.`,
@@ -192,6 +212,7 @@ export function evaluateDraft(draft, context = {}) {
         } else if (overduePolicy === 'approval') {
           requiredApprovals.push({
             kind: 'overdue_override',
+            ruleTriggered: 'overdue_present',
             overdue: toRupees(creditProfile.overduePaise),
             days: creditProfile.oldestOverdueDays,
             message: `Customer has overdue balance of Rs ${toRupees(creditProfile.overduePaise)}. Admin overdue override is required.`,
@@ -199,6 +220,7 @@ export function evaluateDraft(draft, context = {}) {
         } else if (overduePolicy === 'warn') {
           warnings.push({
             code: 'OVERDUE_CUSTOMER',
+            ruleTriggered: 'overdue_present',
             overdue: toRupees(creditProfile.overduePaise),
             days: creditProfile.oldestOverdueDays,
             message: `Customer has overdue balance of Rs ${toRupees(creditProfile.overduePaise)} (${creditProfile.oldestOverdueDays} days).`,
@@ -216,11 +238,27 @@ export function evaluateDraft(draft, context = {}) {
 
       // Credit bill over limit or creditLimit is 0 needs credit_override approval
       if (impact.overLimit || creditProfile.creditLimitPaise === 0) {
+        if (isCreditOverrideApproved) {
+          warnings.push({
+            code: 'CREDIT_LIMIT_OVERRIDE_APPROVED',
+            message: 'Bill total exceeds credit limit (credit override approved).',
+          });
+        } else {
+          requiredApprovals.push({
+            kind: 'credit_override',
+            ruleTriggered: 'credit_limit_exceeded',
+            message: 'Bill total exceeds available customer credit limit. Admin credit override is required.',
+            newOutstanding: toRupees(impact.newOutstandingPaise),
+            creditLimit: toRupees(creditProfile.creditLimitPaise),
+          });
+        }
+      }
+
+      // If credit override is pending, block submission until decided
+      if (draft.creditOverrideStatus === 'pending') {
         requiredApprovals.push({
-          kind: 'credit_override',
-          message: 'Bill total exceeds available customer credit limit. Admin credit override is required.',
-          newOutstanding: toRupees(impact.newOutstandingPaise),
-          creditLimit: toRupees(creditProfile.creditLimitPaise),
+          kind: 'credit_override_pending',
+          message: 'Credit override request is pending admin approval.',
         });
       }
     }
