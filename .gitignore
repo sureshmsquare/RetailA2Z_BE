@@ -1,9 +1,9 @@
-
 # Dependencies
 node_modules/
 
 # Environment variables
 .env
+.env.local
 .env.*
 !.env.example
 
@@ -11,9 +11,11 @@ node_modules/
 logs/
 *.log
 npm-debug.log*
+yarn-error.log*
 
 # Build and coverage
 dist/
+build/
 coverage/
 
 # Runtime
@@ -28,9 +30,22 @@ pids/
 .DS_Store
 Thumbs.db
 
-# Automated tests (local only)
+# Automated tests & test files (local only)
+tests/
+__tests__/
 /tests/
-
-# Test files (local only)
+*.test.js
+*.test.jsx
 *.test.*
 *.spec.*
+
+# Temporary AI / scratch files
+*.txt
+scratch/
+tmp/
+temp/
+.antigravity/
+
+# AI generated docs (but keep README)
+*.md
+!README.md
